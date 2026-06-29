@@ -44,6 +44,8 @@ which hardcoded it to 0).
 - Anthropic `thinking` request blocks are not mapped to provider-specific reasoning params
   (only the `max_tokens` floor is applied).
 
-The `anthropic`-flavor (passthrough, e.g. OpenCode Go) does **no** translation — it forwards
-the Anthropic body to the upstream `/messages`, only stripping `cache_control` for
-configured models.
+The `anthropic`-flavor (passthrough) does **no** translation — it forwards the Anthropic body
+to the upstream `/messages`, only stripping `cache_control` for configured models and
+normalizing string content to blocks. It's for genuinely Anthropic-native endpoints.
+(OpenCode Go uses the `openai` flavor instead: its native Anthropic endpoint mistranslates
+tool definitions to Moonshot/kimi, so we translate and call `/chat/completions`.)

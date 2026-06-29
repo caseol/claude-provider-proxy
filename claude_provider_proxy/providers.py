@@ -57,11 +57,15 @@ class ProviderConfig:
 
 BUILTIN: dict[str, dict] = {
     "opencode-go": {
-        "flavor": "anthropic",
+        # OpenAI-compatible flavor (like the original oc-go-cc setup): OpenCode Go's
+        # native Anthropic /messages endpoint mistranslates tools to Moonshot/kimi
+        # ("function name is invalid"), so we translate and hit /chat/completions.
+        "flavor": "openai",
         "base_url": "https://opencode.ai/zen/go/v1",
         "api_key_env": "OC_GO_CC_API_KEY",
-        "auth": "x-api-key",   # OpenCode Go's /messages expects the x-api-key header
-        "cache_control_strip": ["kimi"],
+        "auth": "bearer",
+        "reasoning_models": ["kimi-k2.7-code", "qwen3.7-max", "qwen3.7-plus",
+                             "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2"],
         "default_model": "kimi-k2.7-code",
     },
     "opencode-zen": {

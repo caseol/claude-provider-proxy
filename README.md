@@ -18,8 +18,8 @@ Running Claude Code on third-party/cheaper/free model backends meant a separate 
 
 - **Multi-provider, one daemon** — provider chosen by URL path (`/opencode-zen`, `/opencode-go`, `/nvidia`, …). Run several at once.
 - **Two translation flavors**:
-  - `openai` — full Anthropic↔OpenAI Chat Completions translation (system prompts, content blocks, tools, streaming SSE, tool-call round-tripping). For OpenCode Zen, NVIDIA, and any OpenAI-compatible endpoint.
-  - `anthropic` — passthrough to a native Anthropic endpoint (for OpenCode Go), with per-model `cache_control` stripping (kimi rejects it).
+  - `openai` — full Anthropic↔OpenAI Chat Completions translation (system prompts, content blocks, tools, streaming SSE, tool-call round-tripping). Used by **OpenCode Go, OpenCode Zen, NVIDIA**, and any OpenAI-compatible endpoint.
+  - `anthropic` — passthrough to a genuinely Anthropic-native endpoint, with per-model `cache_control` stripping. (OpenCode Go is served via the `openai` flavor — its native Anthropic endpoint mistranslates tools.)
 - **Per-provider profiles** — `OPUS/SONNET/HAIKU/SUBAGENT` model slots, `active_profile`, `--profile`, and `profile list|use|show|new` — same workflow as before.
 - **Ordered fallback chains** — per-model fallback on overload/quota/5xx (generalizes the old single-subagent fallback).
 - **Config-driven** — add/override providers in `providers.json`; keys in a local `.env`.

@@ -22,8 +22,9 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
 ## Built-in defaults
 
 ```jsonc
-"opencode-go":  { flavor:"anthropic", base_url:"https://opencode.ai/zen/go/v1",
-                  api_key_env:"OC_GO_CC_API_KEY", auth:"bearer", cache_control_strip:["kimi"] }
+"opencode-go":  { flavor:"openai", base_url:"https://opencode.ai/zen/go/v1",
+                  api_key_env:"OC_GO_CC_API_KEY", auth:"bearer",
+                  reasoning_models:["kimi-k2.7-code","qwen3.7-max","qwen3.7-plus","deepseek-v4-flash","deepseek-v4-pro","glm-5.2"] }
 "opencode-zen": { flavor:"openai", base_url:"https://opencode.ai/zen/v1",
                   api_key_env:"ZEN_API_KEY", auth:"bearer", user_agent:"<browser UA>",
                   reasoning_models:["deepseek-v4-flash-free","deepseek-v4-pro","deepseek-v4-flash"] }

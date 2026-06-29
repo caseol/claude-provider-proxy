@@ -24,4 +24,7 @@ into one configurable daemon.
 
 ### Dropped
 - The `oc-go-cc` Go binary and `cache-strip-proxy` — OpenCode Go is now called directly via
-  its Anthropic-compatible endpoint, with cache_control stripping reimplemented in-proxy.
+  its OpenAI-compatible endpoint (`openai` flavor), reusing the shared translation core. Its
+  native Anthropic endpoint is avoided because it mistranslates tools to Moonshot/kimi
+  ("function name is invalid"). Temperature is only forwarded when the client sets it (kimi
+  rejects non-default values).
