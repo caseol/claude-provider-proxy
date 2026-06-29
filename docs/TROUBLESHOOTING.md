@@ -2,7 +2,7 @@
 
 ### `has_key: false` in /healthz
 The key env var isn't set. Put it in `~/.config/claude-provider-proxy/.env`
-(`ZEN_API_KEY=…`, etc.) and restart the daemon (`claude-provider-proxy daemon stop && … start`).
+(`ZEN_API_KEY=…`, etc.) and restart the daemon (`claude-proxy daemon stop && … start`).
 The `.env` is loaded at daemon startup.
 
 ### `404 unknown provider`

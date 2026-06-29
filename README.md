@@ -35,7 +35,7 @@ Claude Code ──► ANTHROPIC_BASE_URL=http://127.0.0.1:3460/<provider>
                  └─ flavor "anthropic": passthrough (+cache_control strip) → {base}/messages
 ```
 
-One FastAPI daemon (port 3460). The `bin/claude-provider-proxy` launcher resolves the
+One FastAPI daemon (port 3460). The `bin/claude-proxy` launcher resolves the
 profile, exports the model-slot env, points Claude Code at the right provider path, and
 execs `claude`.
 
@@ -66,17 +66,17 @@ OC_GO_CC_API_KEY=sk-opencode-...
 
 ```bash
 # launch Claude Code on a provider (starts the daemon if needed)
-claude-provider-proxy opencode-zen
-claude-provider-proxy nvidia --profile default
-claude-provider-proxy opencode-go -- --continue        # args after -- go to claude
+claude-proxy opencode-zen
+claude-proxy nvidia --profile default
+claude-proxy opencode-go -- --continue        # args after -- go to claude
 
 # profiles (per provider)
-claude-provider-proxy profile opencode-zen list
-claude-provider-proxy profile opencode-zen use default
-claude-provider-proxy profile nvidia new fast
+claude-proxy profile opencode-zen list
+claude-proxy profile opencode-zen use default
+claude-proxy profile nvidia new fast
 
 # daemon control
-claude-provider-proxy daemon start|stop|status|logs
+claude-proxy daemon start|stop|status|logs
 ```
 
 Call the API directly (any HTTP client):

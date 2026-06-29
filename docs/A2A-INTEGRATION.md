@@ -6,7 +6,7 @@ identifies each session by its provider.
 
 ## What the launcher does
 
-`bin/claude-provider-proxy <provider>` sets `AGENT_LANE` to a short lane name
+`bin/claude-proxy <provider>` sets `AGENT_LANE` to a short lane name
 (`opencode-go→go`, `opencode-zen→zen`, `nvidia→nv`, otherwise the provider name) and, if
 `~/.local/bin/_a2a_common.sh` exists, sources it (loading the A2A shim and exec'ing
 `claude`). Otherwise it just `exec claude`.
@@ -29,5 +29,5 @@ lane from the path.
 
 For the gateway's `ask_agent` resume-fork to reach a session on a given lane, the gateway's
 `lanes.json` must map that lane to a launch command — e.g.
-`{"zen": {"command": "claude-provider-proxy"}}` plus the provider arg, or a thin wrapper.
+`{"zen": {"command": "claude-proxy"}}` plus the provider arg, or a thin wrapper.
 Async messaging (`send_message`/inbox) needs no such mapping.

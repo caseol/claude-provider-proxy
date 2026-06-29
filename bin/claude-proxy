@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# claude-provider-proxy — launch Claude Code against a chosen backend provider.
+# claude-proxy — launch Claude Code against a chosen backend provider.
 #
-#   claude-provider-proxy <provider> [--profile <name>] [-- <claude args>]
-#   claude-provider-proxy profile <provider> {list|use <name>|show [name]|new <name>}
-#   claude-provider-proxy daemon {start|stop|status|logs}
+#   claude-proxy <provider> [--profile <name>] [-- <claude args>]
+#   claude-proxy profile <provider> {list|use <name>|show [name]|new <name>}
+#   claude-proxy daemon {start|stop|status|logs}
 #
 # The daemon (single FastAPI process) is shared by all providers; the provider is
 # selected by the URL path (ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<provider>).
@@ -47,14 +47,14 @@ daemon() {
       [ -n "$pid" ] && kill "$pid" 2>/dev/null && echo "parado ($pid)" || echo "não estava no ar" ;;
     status) port_up && echo "no ar (porta $PORT)" || echo "parado" ;;
     logs) tail -f "$LOG" ;;
-    *) echo "uso: claude-provider-proxy daemon {start|stop|status|logs}"; return 1 ;;
+    *) echo "uso: claude-proxy daemon {start|stop|status|logs}"; return 1 ;;
   esac
 }
 
 # ── profile management ────────────────────────────────────────────
 profile_cmd() {
   local provider="$1" action="$2" name="$3"
-  [ -z "$provider" ] && { echo "uso: claude-provider-proxy profile <provider> <list|use|show|new>"; exit 1; }
+  [ -z "$provider" ] && { echo "uso: claude-proxy profile <provider> <list|use|show|new>"; exit 1; }
   local pdir="$PROFILES/$provider"; local active="$pdir/active_profile"
   mkdir -p "$pdir"
   case "$action" in
@@ -90,7 +90,7 @@ HAIKU_MODEL=$dm
 SUBAGENT_MODEL=$dm
 EOF
       echo "criado: $t" ;;
-    *) echo "uso: claude-provider-proxy profile <provider> <list|use|show|new>"; exit 1 ;;
+    *) echo "uso: claude-proxy profile <provider> <list|use|show|new>"; exit 1 ;;
   esac
 }
 
@@ -136,7 +136,7 @@ export CLAUDE_CODE_SUBAGENT_MODEL="$SUBAGENT_MODEL"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export AGENT_LANE="$(lane_of "$PROVIDER")"
 
-echo "Claude Code -> claude-provider-proxy ($PORT) -> $PROVIDER${SELECTED_PROFILE:+ [perfil: $SELECTED_PROFILE]}"
+echo "Claude Code -> claude-proxy ($PORT) -> $PROVIDER${SELECTED_PROFILE:+ [perfil: $SELECTED_PROFILE]}"
 echo "Opus: $OPUS_MODEL | Sonnet: $SONNET_MODEL | Haiku: $HAIKU_MODEL"
 
 # A2A integration if installed; else launch claude directly.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Talk to the proxy directly (no Claude Code needed). Daemon must be running:
-#   claude-provider-proxy daemon start
+#   claude-proxy daemon start
 set -e
 P=127.0.0.1:3460
 PROVIDER="${1:-opencode-zen}"

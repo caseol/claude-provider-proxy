@@ -22,16 +22,16 @@ These become the `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` and
 ## Commands
 
 ```bash
-claude-provider-proxy profile <provider> list           # tables profiles + slots, marks active
-claude-provider-proxy profile <provider> use <name>     # set active (use 'none' to clear)
-claude-provider-proxy profile <provider> show [name]    # print a profile
-claude-provider-proxy profile <provider> new <name>     # scaffold a profile
+claude-proxy profile <provider> list           # tables profiles + slots, marks active
+claude-proxy profile <provider> use <name>     # set active (use 'none' to clear)
+claude-proxy profile <provider> show [name]    # print a profile
+claude-proxy profile <provider> new <name>     # scaffold a profile
 ```
 
 ## Launch with a profile
 
 ```bash
-claude-provider-proxy nvidia --profile fast
+claude-proxy nvidia --profile fast
 ```
 
 ## Fallbacks

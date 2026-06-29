@@ -44,7 +44,7 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
   }
 }
 ```
-Then `MY_LLM_KEY=...` in `.env`, and `claude-provider-proxy my-llm`. The proxy serves it at
+Then `MY_LLM_KEY=...` in `.env`, and `claude-proxy my-llm`. The proxy serves it at
 `http://127.0.0.1:3460/my-llm/v1/messages`.
 
 ## Fallback chains

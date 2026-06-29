@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy the launcher, seed config, and import existing keys/profiles if present.
-# The daemon can also run straight from the repo (./bin/claude-provider-proxy daemon start).
+# The daemon can also run straight from the repo (./bin/claude-proxy daemon start).
 set -e
 
 REPO="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -9,7 +9,7 @@ CFG="$HOME/.config/claude-provider-proxy"
 mkdir -p "$BIN" "$CFG/profiles"
 
 echo "CLAUDE_PROVIDER_PROXY_HOME=$REPO" > "$CFG/env"
-install -m 0755 "$REPO/bin/claude-provider-proxy" "$BIN/claude-provider-proxy"
+install -m 0755 "$REPO/bin/claude-proxy" "$BIN/claude-proxy"
 
 # Seed .env by importing keys from the old per-provider configs (if present).
 if [ ! -f "$CFG/.env" ]; then
@@ -36,5 +36,5 @@ import_profiles oc-go-cc   opencode-go
 
 echo
 echo "Pronto. Garanta ~/.local/bin no PATH, então:"
-echo "  claude-provider-proxy opencode-zen      # ou nvidia / opencode-go"
-echo "  claude-provider-proxy daemon status"
+echo "  claude-proxy opencode-zen      # ou nvidia / opencode-go"
+echo "  claude-proxy daemon status"
