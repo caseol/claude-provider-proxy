@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# claude-provider-proxy — launch Claude Code against a chosen backend provider.
+#
+#   claude-provider-proxy <provider> [--profile <name>] [-- <claude args>]
+#   claude-provider-proxy profile <provider> {list|use <name>|show [name]|new <name>}
+#   claude-provider-proxy daemon {start|stop|status|logs}
+#
+# The daemon (single FastAPI process) is shared by all providers; the provider is
+# selected by the URL path (ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<provider>).
+set -e
+
+PORT="${CLAUDE_PROVIDER_PROXY_PORT:-3460}"
+PY="${CLAUDE_PROVIDER_PROXY_PY:-/usr/bin/python3}"
+CFG="$HOME/.config/claude-provider-proxy"
+PROFILES="$CFG/profiles"
+LOG="${CLAUDE_PROVIDER_PROXY_LOG:-/tmp/claude-provider-proxy.log}"
+
+# Resolve repo home (for the daemon): <repo>/bin/this -> <repo>; else env file; else default.
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"; DIR="$(dirname "$SELF")"
+if [ -d "$DIR/../claude_provider_proxy" ]; then HOME_DIR="$(cd "$DIR/.." && pwd)";
+elif [ -f "$CFG/env" ]; then . "$CFG/env"; HOME_DIR="${CLAUDE_PROVIDER_PROXY_HOME:?}";
+else HOME_DIR="$HOME/Workspace/claude-provider-proxy"; fi
+
+port_up() { ss -tlnp "sport = :$PORT" 2>/dev/null | grep -q LISTEN; }
+
+# Provider -> short A2A lane name (keeps A2A lanes consistent with the old setup).
+lane_of() { case "$1" in opencode-go) echo go;; opencode-zen) echo zen;; nvidia) echo nv;; *) echo "$1";; esac; }
+# Provider -> default model for unset slots.
+default_model() { case "$1" in
+  opencode-go) echo kimi-k2.7-code;;
+  opencode-zen) echo deepseek-v4-flash-free;;
+  nvidia) echo deepseek-ai/deepseek-v4-flash;;
+  *) echo "";; esac; }
+
+# ── daemon control ────────────────────────────────────────────────
+daemon() {
+  case "${1:-start}" in
+    start)
+      if port_up; then echo "daemon já no ar (porta $PORT)"; return 0; fi
+      mkdir -p "$CFG"
+      ( cd "$HOME_DIR" && PYTHONPATH="$HOME_DIR" CLAUDE_PROVIDER_PROXY_PORT="$PORT" \
+        nohup "$PY" -m claude_provider_proxy.main >"$LOG" 2>&1 & )
+      for _ in $(seq 1 15); do port_up && break; sleep 1; done
+      port_up && echo "daemon pronto na porta $PORT" || { echo "falhou:"; tail -15 "$LOG"; return 1; } ;;
+    stop)
+      pid=$(ss -tlnp "sport = :$PORT" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1)
+      [ -n "$pid" ] && kill "$pid" 2>/dev/null && echo "parado ($pid)" || echo "não estava no ar" ;;
+    status) port_up && echo "no ar (porta $PORT)" || echo "parado" ;;
+    logs) tail -f "$LOG" ;;
+    *) echo "uso: claude-provider-proxy daemon {start|stop|status|logs}"; return 1 ;;
+  esac
+}
+
+# ── profile management ────────────────────────────────────────────
+profile_cmd() {
+  local provider="$1" action="$2" name="$3"
+  [ -z "$provider" ] && { echo "uso: claude-provider-proxy profile <provider> <list|use|show|new>"; exit 1; }
+  local pdir="$PROFILES/$provider"; local active="$pdir/active_profile"
+  mkdir -p "$pdir"
+  case "$action" in
+    list)
+      local cur=""; [ -f "$active" ] && cur=$(cat "$active")
+      local found=false
+      for f in "$pdir"/*.env; do [ -f "$f" ] || continue; found=true
+        local n; n=$(basename "$f" .env); local mark=""; [ "$n" = "$cur" ] && mark="  << ativo"
+        echo "  $n$mark"
+        grep -E '^(OPUS|SONNET|HAIKU|SUBAGENT)_MODEL=' "$f" | sed 's/^/      /'
+      done
+      $found || echo "  (sem perfis — crie com: profile $provider new <nome>)"
+      [ -n "$cur" ] && echo "  ativo: $cur" || echo "  ativo: (defaults)" ;;
+    use)
+      [ -z "$name" ] && { echo "uso: profile $provider use <nome|none>"; exit 1; }
+      if [ "$name" = none ] || [ "$name" = clear ]; then rm -f "$active"; echo "perfil removido (defaults)"; exit 0; fi
+      [ -f "$pdir/$name.env" ] || { echo "perfil '$name' não existe em $pdir"; exit 1; }
+      echo "$name" >"$active"; echo "perfil ativo ($provider) -> $name" ;;
+    show)
+      [ -z "$name" ] && [ -f "$active" ] && name=$(cat "$active")
+      [ -z "$name" ] && { echo "sem perfil ativo"; exit 0; }
+      [ -f "$pdir/$name.env" ] || { echo "perfil '$name' não existe"; exit 1; }
+      echo "# $provider / $name"; cat "$pdir/$name.env" ;;
+    new)
+      [ -z "$name" ] && { echo "uso: profile $provider new <nome>"; exit 1; }
+      local t="$pdir/$name.env"; [ -f "$t" ] && { echo "já existe: $t"; exit 1; }
+      local dm; dm=$(default_model "$provider")
+      cat >"$t" <<EOF
+# perfil $provider/$name — edite os modelos
+OPUS_MODEL=$dm
+SONNET_MODEL=$dm
+HAIKU_MODEL=$dm
+SUBAGENT_MODEL=$dm
+EOF
+      echo "criado: $t" ;;
+    *) echo "uso: claude-provider-proxy profile <provider> <list|use|show|new>"; exit 1 ;;
+  esac
+}
+
+# ── dispatch ──────────────────────────────────────────────────────
+case "${1:-}" in
+  ""|-h|--help) sed -n '2,11p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  daemon) shift; daemon "$@"; exit $? ;;
+  profile) shift; profile_cmd "$@"; exit $? ;;
+esac
+
+PROVIDER="$1"; shift
+SELECTED_PROFILE=""
+PASSTHRU=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile=*) SELECTED_PROFILE="${1#--profile=}"; shift ;;
+    --profile) SELECTED_PROFILE="$2"; shift 2 ;;
+    --) shift; PASSTHRU+=("$@"); break ;;
+    *) PASSTHRU+=("$1"); shift ;;
+  esac
+done
+
+# Resolve profile: --profile > active_profile > defaults
+pdir="$PROFILES/$PROVIDER"
+[ -z "$SELECTED_PROFILE" ] && [ -f "$pdir/active_profile" ] && SELECTED_PROFILE=$(cat "$pdir/active_profile")
+if [ -n "$SELECTED_PROFILE" ]; then
+  pf="$pdir/$SELECTED_PROFILE.env"
+  [ -f "$pf" ] || { echo "perfil '$SELECTED_PROFILE' não encontrado ($pf)"; exit 1; }
+  set -a; . "$pf"; set +a
+fi
+dm=$(default_model "$PROVIDER")
+: "${OPUS_MODEL:=$dm}"; : "${SONNET_MODEL:=$dm}"; : "${HAIKU_MODEL:=$dm}"; : "${SUBAGENT_MODEL:=$dm}"
+
+# Ensure the daemon is up
+port_up || daemon start >/dev/null
+
+export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT/$PROVIDER"
+export ANTHROPIC_AUTH_TOKEN=unused
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$OPUS_MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$SONNET_MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$HAIKU_MODEL"
+export CLAUDE_CODE_SUBAGENT_MODEL="$SUBAGENT_MODEL"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export AGENT_LANE="$(lane_of "$PROVIDER")"
+
+echo "Claude Code -> claude-provider-proxy ($PORT) -> $PROVIDER${SELECTED_PROFILE:+ [perfil: $SELECTED_PROFILE]}"
+echo "Opus: $OPUS_MODEL | Sonnet: $SONNET_MODEL | Haiku: $HAIKU_MODEL"
+
+# A2A integration if installed; else launch claude directly.
+if [ -f "$HOME/.local/bin/_a2a_common.sh" ]; then
+  source "$HOME/.local/bin/_a2a_common.sh"
+else
+  exec claude "${PASSTHRU[@]}"
+fi

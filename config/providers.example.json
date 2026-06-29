@@ -1,0 +1,25 @@
+{
+  "_comment": "Overrides/additions merged over the built-in providers (opencode-go, opencode-zen, nvidia). Copy to ~/.config/claude-provider-proxy/providers.json and edit. API keys come from ~/.config/claude-provider-proxy/.env (referenced by api_key_env).",
+
+  "opencode-zen": {
+    "fallbacks": {
+      "deepseek-v4-flash-free": ["north-mini-code-free"]
+    }
+  },
+
+  "opencode-go": {
+    "fallbacks": {
+      "kimi-k2.7-code": ["deepseek-v4-flash", "qwen3.7-plus"]
+    },
+    "default_fallback": ["deepseek-v4-flash"]
+  },
+
+  "my-openai-compatible-provider": {
+    "flavor": "openai",
+    "base_url": "https://api.example.com/v1",
+    "api_key_env": "EXAMPLE_API_KEY",
+    "auth": "bearer",
+    "reasoning_models": [],
+    "cache_control_strip": []
+  }
+}

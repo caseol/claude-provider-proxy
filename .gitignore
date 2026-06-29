@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets & runtime
+*.env
+.env
+**/token
+*.log
+*.pid
+
+# OS
+.DS_Store
