@@ -42,6 +42,12 @@ def test_content_blocks_flattened_with_markers():
     assert "ok" in c and "[tool_use: ls id=t1 input=" in c
 
 
+def test_temperature_only_when_provided():
+    base = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+    assert "temperature" not in tx.anthropic_to_openai(base, ZEN)
+    assert tx.anthropic_to_openai({**base, "temperature": 1}, ZEN)["temperature"] == 1
+
+
 def test_reasoning_token_floor():
     body = {"model": "deepseek-v4-flash", "max_tokens": 10,
             "messages": [{"role": "user", "content": "x"}]}

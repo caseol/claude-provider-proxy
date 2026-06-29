@@ -88,9 +88,12 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
         "model": model,
         "messages": openai_messages,
         "max_tokens": max_tokens,
-        "temperature": body.get("temperature", DEFAULT_TEMPERATURE),
         "stream": body.get("stream", False),
     }
+    # Only forward temperature if the client set it — some models (e.g. kimi via
+    # Moonshot) reject any value other than their default ("only 1 is allowed").
+    if "temperature" in body:
+        out["temperature"] = body["temperature"]
     if "tools" in body:
         out["tools"] = [{"type": "function",
                          "function": {"name": t["name"],
