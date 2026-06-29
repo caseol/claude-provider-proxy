@@ -60,7 +60,7 @@ BUILTIN: dict[str, dict] = {
         "flavor": "anthropic",
         "base_url": "https://opencode.ai/zen/go/v1",
         "api_key_env": "OC_GO_CC_API_KEY",
-        "auth": "bearer",
+        "auth": "x-api-key",   # OpenCode Go's /messages expects the x-api-key header
         "cache_control_strip": ["kimi"],
         "default_model": "kimi-k2.7-code",
     },

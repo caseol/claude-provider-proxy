@@ -103,6 +103,14 @@ def test_cache_control_strip_rule():
     assert p.strip_cache_control_for("deepseek-v4-flash") is False
 
 
+def test_normalize_content_string_to_blocks():
+    body = {"messages": [{"role": "user", "content": "hi"},
+                         {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}]}
+    proxy_core.normalize_content(body)
+    assert body["messages"][0]["content"] == [{"type": "text", "text": "hi"}]
+    assert body["messages"][1]["content"] == [{"type": "text", "text": "ok"}]  # unchanged
+
+
 def test_strip_cache_control_recursive():
     body = {"model": "kimi", "messages": [{"role": "user",
             "content": [{"type": "text", "text": "x", "cache_control": {"type": "ephemeral"}}]}],

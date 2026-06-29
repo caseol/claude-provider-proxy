@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 from typing import AsyncIterator
 
@@ -46,6 +47,16 @@ def _headers(provider: ProviderConfig, anthropic: bool) -> dict:
 
 def _err(status: int, message: str) -> dict:
     return {"type": "error", "error": {"type": "api_error", "message": message}}
+
+
+def normalize_content(body: dict) -> dict:
+    """Some Anthropic-compatible upstreams (e.g. OpenCode Go) reject a plain-string
+    message content and require an array of blocks. Claude Code already sends blocks;
+    this makes the passthrough tolerant of string content too."""
+    for m in body.get("messages", []):
+        if isinstance(m.get("content"), str):
+            m["content"] = [{"type": "text", "text": m["content"]}]
+    return body
 
 
 # ---------- flavor: openai (translate) ----------
@@ -108,7 +119,9 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
     last_err = _err(502, "all models failed")
 
     for model in provider.chain_for(requested):
-        out = dict(body, model=model)
+        out = copy.deepcopy(body)
+        out["model"] = model
+        normalize_content(out)
         if provider.strip_cache_control_for(model):
             strip_cache_control(out)
         headers = _headers(provider, anthropic=True)
