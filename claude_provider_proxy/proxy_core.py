@@ -90,6 +90,9 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                     try:
                         async for ev in tx.stream_anthropic_events(resp.aiter_lines(), model):
                             yield ev
+                    except (httpx.RemoteProtocolError, httpx.StreamError, httpx.HTTPError) as e:
+                        yield (f"event: error\ndata: "
+                               f"{json.dumps(_err(502, str(e)))}\n\n")
                     finally:
                         await resp.aclose(); await client.aclose()
                 return "stream", gen()
@@ -101,9 +104,9 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                 if resp.status_code != 200:
                     return resp.status_code, _err(resp.status_code, resp.text[:300])
                 return 200, tx.openai_to_anthropic_response(resp.json(), model)
-        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError) as e:
+        except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException) as e:
             await client.aclose()
-            last_err = _err(502, f"connect error: {e}"); continue
+            last_err = _err(502, f"upstream error: {e}"); continue
         except Exception as e:  # noqa: BLE001
             await client.aclose()
             return 502, _err(502, str(e))
@@ -159,9 +162,9 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
                     return resp.status_code, resp.json()
                 except Exception:  # noqa: BLE001
                     return resp.status_code, _err(resp.status_code, resp.text[:300])
-        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError) as e:
+        except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException) as e:
             await client.aclose()
-            last_err = _err(502, f"connect error: {e}"); continue
+            last_err = _err(502, f"upstream error: {e}"); continue
         except Exception as e:  # noqa: BLE001
             await client.aclose()
             return 502, _err(502, str(e))

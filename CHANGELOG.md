@@ -12,6 +12,16 @@
   contained a top-level `"_comment"` key — exactly what `config/providers.example.json`
   ships and what the docs tell you to copy. The merge loop now skips `_`-prefixed and
   non-dict top-level entries instead of feeding them to `_make()`.
+- (`openai` flavor, streaming) A tool-calls-only response (no text) opened its first
+  `content_block_start` at index 1 instead of 0, desyncing Claude Code's SSE state
+  machine — seen as tool calls that hang or come back empty.
+- (`openai` flavor, streaming) A stall/timeout *after* the upstream stream opened (e.g.
+  a reasoning model going silent mid-generation past the 300s read timeout) propagated
+  an uncaught exception out of the generator, killing the connection with no signal to
+  the client — the same "empty/interrupted turn" symptom. Now caught and surfaced as a
+  clean `event: error` SSE frame, matching the `anthropic` flavor's rawstream path.
+  `httpx.ReadTimeout`/`PoolTimeout`/`WriteTimeout` are also now retried against the
+  fallback chain like connection errors, instead of failing immediately.
 
 ## [0.1.0] — Initial release
 

@@ -5,6 +5,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import httpx                                                       # noqa: E402
+
 from claude_provider_proxy import translate_openai as tx          # noqa: E402
 from claude_provider_proxy import proxy_core                      # noqa: E402
 from claude_provider_proxy.providers import load_providers, ProviderConfig  # noqa: E402
@@ -200,3 +202,50 @@ def test_streaming_tool_call_only_starts_at_index_zero():
     assert len(starts) == 1
     assert starts[0]["index"] == 0
     assert starts[0]["content_block"]["type"] == "tool_use"
+
+
+def test_handle_openai_mid_stream_timeout_yields_sse_error(monkeypatch):
+    """Regression: a stall/timeout *after* the upstream stream has already opened
+    (e.g. a reasoning model that goes silent mid-generation) used to propagate an
+    uncaught exception out of the async generator, which Starlette turns into a
+    connection that just dies with no event — Claude Code sees an empty/interrupted
+    turn. It must instead surface as a clean `event: error` SSE frame, matching what
+    the "anthropic" flavor's rawstream path already does."""
+    import asyncio
+
+    class FakeResp:
+        status_code = 200
+
+        async def aiter_lines(self):
+            yield "data: " + json.dumps({"choices": [{"delta": {"content": "hi"}}]})
+            raise httpx.ReadTimeout("upstream stalled")
+
+        async def aclose(self):
+            pass
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def build_request(self, *a, **k):
+            return object()
+
+        async def send(self, *a, **k):
+            return FakeResp()
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(proxy_core.httpx, "AsyncClient", FakeClient)
+
+    async def run():
+        status, gen = await proxy_core.handle_openai(
+            ZEN, {"model": ZEN.default_model, "stream": True,
+                  "messages": [{"role": "user", "content": "hi"}]})
+        assert status == "stream"
+        return [e async for e in gen]
+
+    events = asyncio.run(run())
+    joined = "".join(events)
+    assert "text_delta" in joined      # the pre-timeout chunk still made it through
+    assert "event: error" in joined    # and the stall surfaces cleanly, not a dead socket
