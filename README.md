@@ -20,7 +20,7 @@ Running Claude Code on third-party/cheaper/free model backends meant a separate 
 - **Two translation flavors**:
   - `openai` — full Anthropic↔OpenAI Chat Completions translation (system prompts, content blocks, tools, streaming SSE, tool-call round-tripping). Used by **OpenCode Go, OpenCode Zen, NVIDIA**, and any OpenAI-compatible endpoint.
   - `anthropic` — passthrough to a genuinely Anthropic-native endpoint, with per-model `cache_control` stripping. (OpenCode Go is served via the `openai` flavor — its native Anthropic endpoint mistranslates tools.)
-- **Per-provider profiles** — `OPUS/SONNET/HAIKU/SUBAGENT` model slots, `active_profile`, `--profile`, and `profile list|use|show|new` — same workflow as before.
+- **Per-provider profiles** — `FABLE/OPUS/SONNET/HAIKU/SUBAGENT` model slots, `active_profile`, `--profile`, and `profile list|use|show|new` — same workflow as before.
 - **Ordered fallback chains** — per-model fallback on overload/quota/5xx (generalizes the old single-subagent fallback).
 - **Config-driven** — add/override providers in `providers.json`; keys in a local `.env`.
 - **Streaming** — Anthropic SSE out, with `usage.output_tokens` correctly propagated.
@@ -92,7 +92,7 @@ See [`examples/curl_examples.sh`](examples/curl_examples.sh).
 ## Configuration
 
 - **Providers** — built-in: `opencode-go`, `opencode-zen`, `nvidia`. Override or add your own in `~/.config/claude-provider-proxy/providers.json` (see [`config/providers.example.json`](config/providers.example.json) and [docs/PROVIDERS.md](docs/PROVIDERS.md)).
-- **Profiles** — `~/.config/claude-provider-proxy/profiles/<provider>/<name>.env` with the four model slots. [docs/PROFILES.md](docs/PROFILES.md).
+- **Profiles** — `~/.config/claude-provider-proxy/profiles/<provider>/<name>.env` with the five model slots. [docs/PROFILES.md](docs/PROFILES.md).
 - **Keys** — `~/.config/claude-provider-proxy/.env`.
 - **Port** — `CLAUDE_PROVIDER_PROXY_PORT` (default 3460).
 

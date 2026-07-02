@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `FABLE_MODEL` profile slot (`ANTHROPIC_DEFAULT_FABLE_MODEL`), matching Claude Code's new
+  Fable model slot (Mythos-class tier, above Opus). `claude-proxy profile <provider> new`
+  now seeds all five slots; `list`/`show` display `FABLE_MODEL` alongside the others.
+
 ## [0.1.0] — Initial release
 
 Unifies three separate Claude Code backend proxies (OpenCode Go, OpenCode Zen, NVIDIA NIM)

@@ -64,7 +64,7 @@ profile_cmd() {
       for f in "$pdir"/*.env; do [ -f "$f" ] || continue; found=true
         local n; n=$(basename "$f" .env); local mark=""; [ "$n" = "$cur" ] && mark="  << ativo"
         echo "  $n$mark"
-        grep -E '^(OPUS|SONNET|HAIKU|SUBAGENT)_MODEL=' "$f" | sed 's/^/      /'
+        grep -E '^(FABLE|OPUS|SONNET|HAIKU|SUBAGENT)_MODEL=' "$f" | sed 's/^/      /'
       done
       $found || echo "  (sem perfis — crie com: profile $provider new <nome>)"
       [ -n "$cur" ] && echo "  ativo: $cur" || echo "  ativo: (defaults)" ;;
@@ -84,6 +84,7 @@ profile_cmd() {
       local dm; dm=$(default_model "$provider")
       cat >"$t" <<EOF
 # perfil $provider/$name — edite os modelos
+FABLE_MODEL=$dm
 OPUS_MODEL=$dm
 SONNET_MODEL=$dm
 HAIKU_MODEL=$dm
@@ -122,13 +123,14 @@ if [ -n "$SELECTED_PROFILE" ]; then
   set -a; . "$pf"; set +a
 fi
 dm=$(default_model "$PROVIDER")
-: "${OPUS_MODEL:=$dm}"; : "${SONNET_MODEL:=$dm}"; : "${HAIKU_MODEL:=$dm}"; : "${SUBAGENT_MODEL:=$dm}"
+: "${FABLE_MODEL:=$dm}"; : "${OPUS_MODEL:=$dm}"; : "${SONNET_MODEL:=$dm}"; : "${HAIKU_MODEL:=$dm}"; : "${SUBAGENT_MODEL:=$dm}"
 
 # Ensure the daemon is up
 port_up || daemon start >/dev/null
 
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT/$PROVIDER"
 export ANTHROPIC_AUTH_TOKEN=unused
+export ANTHROPIC_DEFAULT_FABLE_MODEL="$FABLE_MODEL"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="$OPUS_MODEL"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="$SONNET_MODEL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="$HAIKU_MODEL"
@@ -137,7 +139,7 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export AGENT_LANE="$(lane_of "$PROVIDER")"
 
 echo "Claude Code -> claude-proxy ($PORT) -> $PROVIDER${SELECTED_PROFILE:+ [perfil: $SELECTED_PROFILE]}"
-echo "Opus: $OPUS_MODEL | Sonnet: $SONNET_MODEL | Haiku: $HAIKU_MODEL"
+echo "Fable: $FABLE_MODEL | Opus: $OPUS_MODEL | Sonnet: $SONNET_MODEL | Haiku: $HAIKU_MODEL"
 
 # A2A integration if installed; else launch claude directly.
 if [ -f "$HOME/.local/bin/_a2a_common.sh" ]; then
