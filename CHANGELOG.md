@@ -7,6 +7,12 @@
   Fable model slot (Mythos-class tier, above Opus). `claude-proxy profile <provider> new`
   now seeds all five slots; `list`/`show` display `FABLE_MODEL` alongside the others.
 
+### Fixed
+- `load_providers()` crashed the daemon (`KeyError: 'base_url'`) if `providers.json`
+  contained a top-level `"_comment"` key — exactly what `config/providers.example.json`
+  ships and what the docs tell you to copy. The merge loop now skips `_`-prefixed and
+  non-dict top-level entries instead of feeding them to `_make()`.
+
 ## [0.1.0] — Initial release
 
 Unifies three separate Claude Code backend proxies (OpenCode Go, OpenCode Zen, NVIDIA NIM)

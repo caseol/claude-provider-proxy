@@ -102,6 +102,26 @@ def test_chain_for():
     assert p.chain_for("q") == ["q", "z"]
 
 
+def test_load_providers_ignores_comment_key(tmp_path, monkeypatch):
+    """providers.example.json (and the docs) use a top-level "_comment" string for
+    guidance; load_providers() must not choke on it (regression: used to insert a
+    bogus {} entry that then crashed _make() with KeyError('base_url'))."""
+    import claude_provider_proxy.providers as providers_mod
+
+    cfg = tmp_path / "providers.json"
+    cfg.write_text(json.dumps({
+        "_comment": "human note, not a provider",
+        "opencode-go": {"fallbacks": {"qwen3.7-max": ["kimi-k2.7-code"]}},
+    }))
+    monkeypatch.setattr(providers_mod, "PROVIDERS_FILE", cfg)
+
+    result = providers_mod.load_providers()
+
+    assert "_comment" not in result
+    assert result["opencode-go"].fallbacks == {"qwen3.7-max": ["kimi-k2.7-code"]}
+    assert result["opencode-go"].base_url  # inherited from BUILTIN, not clobbered
+
+
 def test_cache_control_strip_rule():
     p = ProviderConfig(name="go", flavor="anthropic", base_url="http://u",
                        api_key_env="K", cache_control_strip=["kimi"])

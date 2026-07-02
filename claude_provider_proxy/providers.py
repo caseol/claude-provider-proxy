@@ -111,8 +111,11 @@ def load_providers() -> dict[str, ProviderConfig]:
     if PROVIDERS_FILE.exists():
         try:
             user = json.loads(PROVIDERS_FILE.read_text())
-            for name, d in user.items():
-                merged.setdefault(name, {}).update(d)
         except Exception:  # noqa: BLE001
-            pass
+            user = {}
+        for name, d in user.items():
+            # "_comment"-style metadata keys (see providers.example.json) aren't providers.
+            if name.startswith("_") or not isinstance(d, dict):
+                continue
+            merged.setdefault(name, {}).update(d)
     return {name: _make(name, d) for name, d in merged.items()}
