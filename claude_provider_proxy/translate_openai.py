@@ -272,7 +272,9 @@ async def stream_anthropic_events(lines: AsyncIterator[str], model: str) -> Asyn
 
     if text_open:
         yield _sse("content_block_stop", {"type": "content_block_stop", "index": 0})
-    index = 1
+    # Block indices must be contiguous from 0. If no text block was opened (a
+    # tool-calls-only response), tool blocks start at 0, not 1.
+    index = 1 if text_open else 0
 
     def _emit_tool(idx, name, raw_args, inp):
         nonlocal index

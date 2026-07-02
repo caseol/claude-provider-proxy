@@ -171,3 +171,32 @@ def test_streaming_events_and_usage():
     assert '"text_delta"' in joined and "Hel" in joined and "lo" in joined
     assert '"output_tokens": 2' in joined   # usage propagated (fix)
     assert events[-1].startswith("event: message_stop")
+
+
+def test_streaming_tool_call_only_starts_at_index_zero():
+    """Regression: a response that's *only* a native tool_call (no text delta) must
+    still open its first content block at index 0 — Anthropic block indices are
+    contiguous from 0, and a stray index 1 first block confuses Claude Code's SSE
+    parser (observed as stuck/interrupted tool calls)."""
+    import asyncio
+
+    async def fake_lines():
+        chunks = [
+            {"choices": [{"delta": {"tool_calls": [
+                {"index": 0, "id": "call_1", "function": {"name": "grep_search", "arguments": ""}}]}}]},
+            {"choices": [{"delta": {"tool_calls": [
+                {"index": 0, "function": {"arguments": "{\"pattern\": \"TODO\"}"}}]}}]},
+            {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+        ]
+        for c in chunks:
+            yield "data: " + json.dumps(c)
+        yield "data: [DONE]"
+
+    async def run():
+        return [e async for e in tx.stream_anthropic_events(fake_lines(), "m")]
+
+    events = asyncio.run(run())
+    starts = [json.loads(e.split("data: ", 1)[1]) for e in events if "content_block_start" in e]
+    assert len(starts) == 1
+    assert starts[0]["index"] == 0
+    assert starts[0]["content_block"]["type"] == "tool_use"
