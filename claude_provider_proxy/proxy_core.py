@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from typing import AsyncIterator
 
 import httpx
@@ -17,6 +18,7 @@ from . import translate_openai as tx
 from .providers import RETRYABLE_STATUS, ProviderConfig
 
 CHAT_TIMEOUT = httpx.Timeout(300.0, connect=15.0)
+log = logging.getLogger("claude_provider_proxy")
 
 
 def strip_cache_control(obj):
@@ -80,10 +82,14 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                 if resp.status_code in RETRYABLE_STATUS:
                     txt = (await resp.aread()).decode("utf-8", "replace")
                     await resp.aclose(); await client.aclose()
+                    log.warning("%s: %s -> %s (pre-stream), falling back",
+                                provider.name, model, resp.status_code)
                     last_err = _err(resp.status_code, txt[:300]); continue
                 if resp.status_code != 200:
                     txt = (await resp.aread()).decode("utf-8", "replace")
                     await resp.aclose(); await client.aclose()
+                    log.warning("%s: %s -> %s (pre-stream), non-retryable",
+                                provider.name, model, resp.status_code)
                     return resp.status_code, _err(resp.status_code, txt[:300])
 
                 async def gen():
@@ -91,6 +97,7 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                         async for ev in tx.stream_anthropic_events(resp.aiter_lines(), model):
                             yield ev
                     except (httpx.RemoteProtocolError, httpx.StreamError, httpx.HTTPError) as e:
+                        log.warning("%s: %s stalled mid-stream: %s", provider.name, model, e)
                         yield (f"event: error\ndata: "
                                f"{json.dumps(_err(502, str(e)))}\n\n")
                     finally:
@@ -100,16 +107,21 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                 resp = await client.post(url, headers=headers, json=oai)
                 await client.aclose()
                 if resp.status_code in RETRYABLE_STATUS:
+                    log.warning("%s: %s -> %s, falling back",
+                                provider.name, model, resp.status_code)
                     last_err = _err(resp.status_code, resp.text[:300]); continue
                 if resp.status_code != 200:
                     return resp.status_code, _err(resp.status_code, resp.text[:300])
                 return 200, tx.openai_to_anthropic_response(resp.json(), model)
         except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException) as e:
             await client.aclose()
+            log.warning("%s: %s raised %s, falling back", provider.name, model, e)
             last_err = _err(502, f"upstream error: {e}"); continue
         except Exception as e:  # noqa: BLE001
             await client.aclose()
+            log.warning("%s: %s raised unexpected %s", provider.name, model, e)
             return 502, _err(502, str(e))
+    log.warning("%s: fallback chain exhausted for %s", provider.name, requested)
     return 502, last_err
 
 
@@ -136,10 +148,14 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
                 if resp.status_code in RETRYABLE_STATUS:
                     txt = (await resp.aread()).decode("utf-8", "replace")
                     await resp.aclose(); await client.aclose()
+                    log.warning("%s: %s -> %s (pre-stream), falling back",
+                                provider.name, model, resp.status_code)
                     last_err = _err(resp.status_code, txt[:300]); continue
                 if resp.status_code != 200:
                     txt = (await resp.aread()).decode("utf-8", "replace")
                     await resp.aclose(); await client.aclose()
+                    log.warning("%s: %s -> %s (pre-stream), non-retryable",
+                                provider.name, model, resp.status_code)
                     return resp.status_code, _err(resp.status_code, txt[:300])
 
                 async def gen():
@@ -147,6 +163,7 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
                         async for chunk in resp.aiter_raw():
                             yield chunk
                     except (httpx.RemoteProtocolError, httpx.StreamError, httpx.HTTPError) as e:
+                        log.warning("%s: %s stalled mid-stream: %s", provider.name, model, e)
                         yield (f"event: error\ndata: "
                                f"{json.dumps(_err(502, str(e)))}\n\n").encode()
                     finally:
@@ -156,6 +173,8 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
                 resp = await client.post(url, headers=headers, json=out)
                 await client.aclose()
                 if resp.status_code in RETRYABLE_STATUS:
+                    log.warning("%s: %s -> %s, falling back",
+                                provider.name, model, resp.status_code)
                     last_err = _err(resp.status_code, resp.text[:300]); continue
                 # pass the upstream Anthropic response (success or hard error) through
                 try:
@@ -164,8 +183,11 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
                     return resp.status_code, _err(resp.status_code, resp.text[:300])
         except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException) as e:
             await client.aclose()
+            log.warning("%s: %s raised %s, falling back", provider.name, model, e)
             last_err = _err(502, f"upstream error: {e}"); continue
         except Exception as e:  # noqa: BLE001
             await client.aclose()
+            log.warning("%s: %s raised unexpected %s", provider.name, model, e)
             return 502, _err(502, str(e))
+    log.warning("%s: fallback chain exhausted for %s", provider.name, requested)
     return 502, last_err

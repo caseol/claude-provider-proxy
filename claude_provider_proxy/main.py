@@ -1,6 +1,8 @@
 """Entrypoint: uvicorn on 127.0.0.1."""
 from __future__ import annotations
 
+import logging
+
 import uvicorn
 
 from . import config
@@ -8,6 +10,8 @@ from . import config
 
 def main() -> None:
     config.load_env()
+    logging.basicConfig(level=logging.WARNING,
+                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     print(f"claude-provider-proxy on http://{config.HOST}:{config.PORT}")
     print("point Claude Code at  ANTHROPIC_BASE_URL=http://127.0.0.1:"
           f"{config.PORT}/<provider>")
