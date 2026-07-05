@@ -21,6 +21,8 @@
     "auth": "bearer",
     "reasoning_models": [],
     "cache_control_strip": [],
-    "transient_error_patterns": []
+    "transient_error_patterns": [],
+    "native_tool_history": false,
+    "reasoning_extra_body": {}
   }
 }

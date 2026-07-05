@@ -12,6 +12,8 @@ from claude_provider_proxy import proxy_core                      # noqa: E402
 from claude_provider_proxy.providers import load_providers, ProviderConfig  # noqa: E402
 
 ZEN = load_providers()["opencode-zen"]
+NATIVE = ProviderConfig(name="nt", flavor="openai", base_url="http://u", api_key_env="K",
+                        native_tool_history=True)
 
 
 # ---- request translation ----
@@ -157,6 +159,160 @@ def test_top_k_metadata_parallel_tool_calls_not_forwarded():
             "top_k": 40, "metadata": {"user_id": "abc"}, "parallel_tool_calls": False}
     o = tx.anthropic_to_openai(body, ZEN)
     assert "top_k" not in o and "metadata" not in o and "parallel_tool_calls" not in o
+
+
+# ---- native tool history (native_tool_history=True) ----
+
+def test_native_tool_history_full_round_trip():
+    """Full turn (user -> assistant tool_use -> user tool_result) round-trips to
+    OpenAI's native assistant.tool_calls + role:"tool" shape, with the tool reply
+    ordered immediately after the assistant tool_calls message."""
+    body = {"model": "m", "messages": [
+        {"role": "user", "content": "list files"},
+        {"role": "assistant", "content": [
+            {"type": "text", "text": "ok, listing"},
+            {"type": "tool_use", "id": "call_1", "name": "ls", "input": {"path": "/x"}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "call_1",
+             "content": [{"type": "text", "text": "a.txt"}]},
+            {"type": "text", "text": "now what?"},
+        ]},
+    ]}
+    o = tx.anthropic_to_openai(body, NATIVE)
+    msgs = o["messages"]
+    assert msgs[0] == {"role": "user", "content": "list files"}
+    assert msgs[1]["role"] == "assistant"
+    assert msgs[1]["content"] == "ok, listing"
+    tc = msgs[1]["tool_calls"][0]
+    assert tc["id"] == "call_1"
+    assert tc["function"]["name"] == "ls"
+    assert json.loads(tc["function"]["arguments"]) == {"path": "/x"}
+    assert msgs[2] == {"role": "tool", "tool_call_id": "call_1", "content": "a.txt"}
+    assert msgs[3] == {"role": "user", "content": "now what?"}
+
+
+def test_native_tool_history_assistant_tool_only_has_null_content():
+    body = {"model": "m", "messages": [{"role": "assistant", "content": [
+        {"type": "tool_use", "id": "t1", "name": "ls", "input": {}},
+    ]}]}
+    o = tx.anthropic_to_openai(body, NATIVE)
+    m = o["messages"][0]
+    assert m["content"] is None
+    assert m["tool_calls"][0]["function"]["name"] == "ls"
+
+
+def test_native_tool_history_error_result_prefixed():
+    body = {"model": "m", "messages": [{"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "bad", "is_error": True},
+    ]}]}
+    o = tx.anthropic_to_openai(body, NATIVE)
+    assert o["messages"][0]["content"].startswith("[tool error] ")
+
+
+def test_native_tool_history_empty_result_placeholder():
+    body = {"model": "m", "messages": [{"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": []},
+    ]}]}
+    o = tx.anthropic_to_openai(body, NATIVE)
+    assert o["messages"][0]["content"] == "[empty result]"
+
+
+def test_marker_mode_unchanged_by_default():
+    """Same round-trip as test_native_tool_history_full_round_trip, but on a provider
+    without native_tool_history: markers stay the default, no role:"tool"/tool_calls."""
+    body = {"model": "m", "messages": [
+        {"role": "user", "content": "list files"},
+        {"role": "assistant", "content": [
+            {"type": "text", "text": "ok, listing"},
+            {"type": "tool_use", "id": "call_1", "name": "ls", "input": {"path": "/x"}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "call_1",
+             "content": [{"type": "text", "text": "a.txt"}]},
+            {"type": "text", "text": "now what?"},
+        ]},
+    ]}
+    provider = ProviderConfig(name="p", flavor="openai", base_url="http://u", api_key_env="K")
+    o = tx.anthropic_to_openai(body, provider)
+    assert not any(m["role"] == "tool" for m in o["messages"])
+    assert not any("tool_calls" in m for m in o["messages"])
+    assert any("[tool_result:" in m["content"] for m in o["messages"])
+    assert any("[tool_use:" in m["content"] for m in o["messages"])
+
+
+def test_merge_consecutive_user_messages():
+    body = {"model": "m", "messages": [
+        {"role": "user", "content": "a"},
+        {"role": "user", "content": "b"},
+    ]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert len(o["messages"]) == 1
+    assert o["messages"][0] == {"role": "user", "content": "a\nb"}
+
+
+def test_merge_does_not_cross_tool_calls():
+    """An assistant tool_calls message and an adjacent plain assistant text message
+    must not merge (tool_calls carriers are never merge targets). Likewise, two
+    adjacent role:"tool" messages (distinct results) stay separate, not merged."""
+    msgs = [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "ls", "input": {}}]},
+        {"role": "assistant", "content": "done"},
+    ]
+    out = tx.convert_messages(msgs, native_tools=True)
+    assert len(out) == 2
+    assert "tool_calls" in out[0]
+    assert out[1] == {"role": "assistant", "content": "done"}
+
+    tool_msgs = [
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a", "content": "x"}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "b", "content": "y"}]},
+    ]
+    out2 = tx.convert_messages(tool_msgs, native_tools=True)
+    assert out2 == [
+        {"role": "tool", "tool_call_id": "a", "content": "x"},
+        {"role": "tool", "tool_call_id": "b", "content": "y"},
+    ]
+
+
+# ---- reasoning_extra_body injection ----
+
+def test_reasoning_extra_body_injected_when_thinking_enabled():
+    provider = ProviderConfig(name="r", flavor="openai", base_url="http://u", api_key_env="K",
+                              reasoning_models={"m"},
+                              reasoning_extra_body={"chat_template_kwargs": {"thinking": True}})
+    base = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+
+    enabled = {**base, "thinking": {"type": "enabled", "budget_tokens": 1024}}
+    assert tx.anthropic_to_openai(enabled, provider)["chat_template_kwargs"] == {"thinking": True}
+
+    assert "chat_template_kwargs" not in tx.anthropic_to_openai(base, provider)
+
+    other_model = {**enabled, "model": "other"}
+    assert "chat_template_kwargs" not in tx.anthropic_to_openai(other_model, provider)
+
+    disabled = {**base, "thinking": {"type": "disabled"}}
+    assert "chat_template_kwargs" not in tx.anthropic_to_openai(disabled, provider)
+
+
+def test_reasoning_extra_body_not_mutated():
+    """out.update(deepcopy(...)) must not let the caller's mutation of the returned
+    request dict leak back into the provider's shared reasoning_extra_body."""
+    provider = ProviderConfig(name="r", flavor="openai", base_url="http://u", api_key_env="K",
+                              reasoning_models={"m"},
+                              reasoning_extra_body={"chat_template_kwargs": {"thinking": True}})
+    body = {"model": "m", "messages": [{"role": "user", "content": "x"}],
+            "thinking": {"type": "enabled", "budget_tokens": 1024}}
+
+    o1 = tx.anthropic_to_openai(body, provider)
+    o1["chat_template_kwargs"]["thinking"] = False
+    o1["chat_template_kwargs"]["new_key"] = "oops"
+
+    assert provider.reasoning_extra_body == {"chat_template_kwargs": {"thinking": True}}
+
+    o2 = tx.anthropic_to_openai(body, provider)
+    assert o2["chat_template_kwargs"] == {"thinking": True}
 
 
 # ---- response translation ----

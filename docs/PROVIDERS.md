@@ -16,6 +16,8 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
 | `reasoning_models` | Models whose `max_tokens` is floored to `min_tokens_reasoning` (1024) so thinking doesn't starve the answer |
 | `cache_control_strip` | List of model-name substrings; for matches, `cache_control` is stripped before forwarding (kimi rejects it) |
 | `transient_error_patterns` | List of response-body substrings that make an otherwise-fatal status (typically `400`) retryable for **this provider only** — e.g. `["Upstream request failed"]` for `opencode-go` |
+| `native_tool_history` | Replay tool history natively as `assistant.tool_calls` + `role:"tool"` messages instead of text markers. Enable only for backends verified to accept `role:"tool"`; markers stay the safe default |
+| `reasoning_extra_body` | Extra top-level request fields injected when the client requests extended thinking and the model is in `reasoning_models` — e.g. `{"chat_template_kwargs": {"thinking": true}}` for NVIDIA NIM DeepSeek |
 | `fallbacks` | `{model: [chain…]}` — models to try after the requested one on overload/quota/5xx |
 | `default_fallback` | Chain used when a requested model isn't in `fallbacks` |
 | `default_model` | Used when a request omits `model` |
@@ -26,13 +28,16 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
 "opencode-go":  { flavor:"openai", base_url:"https://opencode.ai/zen/go/v1",
                   api_key_env:"OC_GO_CC_API_KEY", auth:"bearer",
                   reasoning_models:["kimi-k2.7-code","qwen3.7-max","qwen3.7-plus","deepseek-v4-flash","deepseek-v4-pro","glm-5.2"],
-                  transient_error_patterns:["Upstream request failed"] }
+                  transient_error_patterns:["Upstream request failed"],
+                  native_tool_history:true }   // verified: gateway accepts role:"tool"
 "opencode-zen": { flavor:"openai", base_url:"https://opencode.ai/zen/v1",
                   api_key_env:"ZEN_API_KEY", auth:"bearer", user_agent:"<browser UA>",
                   reasoning_models:["deepseek-v4-flash-free","deepseek-v4-pro","deepseek-v4-flash"] }
+                  // native_tool_history off: the Zen gateway 400s on role:"tool" (verified) — markers only
 "nvidia":       { flavor:"openai", base_url:"https://integrate.api.nvidia.com/v1",
                   api_key_env:"NVIDIA_API_KEY", auth:"bearer",
-                  reasoning_models:["deepseek-ai/deepseek-v4-flash","deepseek-ai/deepseek-v4-pro"] }
+                  reasoning_models:["deepseek-ai/deepseek-v4-flash","deepseek-ai/deepseek-v4-pro"],
+                  native_tool_history:true }
 ```
 
 ## Adding a provider

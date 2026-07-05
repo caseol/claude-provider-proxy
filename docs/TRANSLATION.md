@@ -29,6 +29,20 @@ OpenAI Chat Completions request and converts the response back. Code:
   OpenAI Chat Completions equivalent and are intentionally dropped.
 - **stop_sequences** → `stop`. **temperature** default 0.7. **stream** → adds
   `stream_options.include_usage`.
+- **consecutive same-role messages**: adjacent plain-text messages sharing a role
+  (`user`/`assistant`/`system`) are merged with `"\n"` — some OpenAI-compatible backends
+  require strict role alternation. Never merges across an `assistant.tool_calls` carrier
+  or a `role:"tool"` message.
+- **tool history (`native_tool_history`)**: markers are the default for tool_use/tool_result
+  round-tripping (see above). Providers with `native_tool_history: true` instead replay it
+  natively: an assistant `tool_use` block becomes `assistant.tool_calls` (arguments
+  JSON-stringified); a user `tool_result` block becomes its own `role:"tool"` message
+  (`tool_call_id` = the Anthropic `tool_use_id`), emitted before any accompanying user text
+  since OpenAI requires the tool reply immediately after the assistant's `tool_calls` message.
+- **thinking → reasoning_extra_body**: when the request has `thinking: {"type": "enabled"}`
+  and the model is in `reasoning_models`, the provider's `reasoning_extra_body` is deep-copied
+  and merged into the top-level OpenAI request (each backend names its reasoning knob
+  differently).
 
 ## Response: OpenAI → Anthropic
 

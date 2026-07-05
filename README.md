@@ -107,7 +107,7 @@ See [`examples/curl_examples.sh`](examples/curl_examples.sh).
 
 ## Nuances & limits
 
-- **Tool calls** are round-tripped as text markers (`[tool_use: …]`) in addition to native OpenAI `tool_calls`, so backends without native tool support still work — but fidelity depends on the model emitting the marker format.
+- **Tool calls** are round-tripped as text markers (`[tool_use: …]`) in addition to native OpenAI `tool_calls`, so backends without native tool support still work — but fidelity depends on the model emitting the marker format. Providers verified to support it can opt into native tool-history replay (`assistant.tool_calls` + `role:"tool"`) via `native_tool_history`; markers remain the default fallback.
 - **Images** in the OpenAI flavor are dropped (replaced with `[image content]`).
 - **Fallback** triggers on connection errors / 429 / 5xx, and on `400`s only when a provider
   explicitly marks the error body as transient via `transient_error_patterns` (e.g. OpenCode

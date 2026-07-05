@@ -11,6 +11,7 @@ backends that don't support native OpenAI tool_calls, in addition to native tool
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import uuid
@@ -72,10 +73,59 @@ def _non_empty(s: str, placeholder: str) -> str:
     return s if s.strip() else placeholder
 
 
-def convert_messages(messages: list[dict]) -> list[dict]:
-    return [{"role": m.get("role", "user"),
-             "content": _non_empty(_flatten_blocks(m.get("content", "")), "[empty message]")}
-            for m in messages]
+def _merge_consecutive(msgs: list[dict]) -> list[dict]:
+    """Merge adjacent plain-text messages of the same role. Anthropic allows repeated
+    roles; some OpenAI-compatible backends require strict alternation. Never merges
+    across tool_calls carriers or role:"tool" messages (each is a distinct result)."""
+    merged: list[dict] = []
+    for m in msgs:
+        prev = merged[-1] if merged else None
+        if (prev is not None and prev["role"] == m["role"]
+                and m["role"] in ("user", "assistant", "system")
+                and "tool_calls" not in prev and "tool_calls" not in m
+                and isinstance(prev.get("content"), str) and isinstance(m.get("content"), str)):
+            prev["content"] = prev["content"] + "\n" + m["content"]
+        else:
+            merged.append(dict(m))
+    return merged
+
+
+def convert_messages(messages: list[dict], native_tools: bool = False) -> list[dict]:
+    out: list[dict] = []
+    for m in messages:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        blocks = content if isinstance(content, list) else []
+        tool_results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
+        tool_uses = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"]
+
+        if native_tools and role == "user" and tool_results:
+            # OpenAI requires role:"tool" replies immediately after the assistant's
+            # tool_calls message, so results come before any accompanying user text.
+            for b in tool_results:
+                res = _flatten_blocks(b.get("content", ""))
+                if b.get("is_error"):
+                    res = f"[tool error] {res}"
+                out.append({"role": "tool",
+                            "tool_call_id": b.get("tool_use_id") or "",
+                            "content": _non_empty(res, "[empty result]")})
+            rest = [b for b in blocks if not (isinstance(b, dict) and b.get("type") == "tool_result")]
+            if rest:
+                out.append({"role": "user",
+                            "content": _non_empty(_flatten_blocks(rest), "[empty message]")})
+        elif native_tools and role == "assistant" and tool_uses:
+            text_blocks = [b for b in blocks if not (isinstance(b, dict) and b.get("type") == "tool_use")]
+            out.append({"role": "assistant",
+                        "content": _flatten_blocks(text_blocks).strip() or None,
+                        "tool_calls": [{"id": b.get("id") or f"call_{uuid.uuid4().hex[:24]}",
+                                        "type": "function",
+                                        "function": {"name": b.get("name"),
+                                                     "arguments": json.dumps(b.get("input", {}))}}
+                                       for b in tool_uses]})
+        else:
+            out.append({"role": role,
+                        "content": _non_empty(_flatten_blocks(content), "[empty message]")})
+    return _merge_consecutive(out)
 
 
 def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
@@ -97,7 +147,8 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
     system_str = _flatten_system(system)
     if system_str:
         openai_messages.append({"role": "system", "content": system_str})
-    openai_messages.extend(convert_messages(messages_data))
+    openai_messages.extend(convert_messages(messages_data,
+                                            native_tools=provider.native_tool_history))
 
     out: dict = {
         "model": model,
@@ -125,6 +176,10 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
         out["top_p"] = body["top_p"]
     # Intentionally not forwarded: top_k, metadata, parallel_tool_calls — no clean
     # OpenAI Chat Completions equivalent.
+    thinking = body.get("thinking")
+    if (provider.reasoning_extra_body and isinstance(thinking, dict)
+            and thinking.get("type") == "enabled" and model in provider.reasoning_models):
+        out.update(copy.deepcopy(provider.reasoning_extra_body))
     if out["stream"]:
         out["stream_options"] = {"include_usage": True}
     return out

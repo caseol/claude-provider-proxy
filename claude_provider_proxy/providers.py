@@ -39,6 +39,16 @@ class ProviderConfig:
     # for what are actually transient backend hiccups (confirmed against oc-go-cc's own
     # logs, which retry through its fallback chain on this same error).
     transient_error_patterns: list[str] = field(default_factory=list)
+    # Replay tool history natively (assistant.tool_calls + role:"tool" messages with
+    # tool_call_id) instead of flattening it into [tool_use:]/[tool_result:] text
+    # markers. Only enable for backends verified to accept role:"tool" — markers stay
+    # the safe default for unknown OpenAI-compatible endpoints.
+    native_tool_history: bool = False
+    # Extra top-level request fields injected when the client asks for extended
+    # thinking (Anthropic `thinking: {"type": "enabled"}`) AND the model is in
+    # reasoning_models — each backend names its reasoning knob differently, e.g.
+    # NVIDIA NIM DeepSeek: {"chat_template_kwargs": {"thinking": true}}.
+    reasoning_extra_body: dict = field(default_factory=dict)
     fallbacks: dict[str, list[str]] = field(default_factory=dict)  # model -> chain
     default_fallback: list[str] = field(default_factory=list)
     default_model: str | None = None
@@ -76,8 +86,14 @@ BUILTIN: dict[str, dict] = {
                              "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2"],
         "default_model": "kimi-k2.7-code",
         "transient_error_patterns": ["Upstream request failed"],
+        # Verified live (2026-07-05): the Go gateway accepts assistant.tool_calls +
+        # role:"tool" history replay (kimi answered from the tool result).
+        "native_tool_history": True,
     },
     "opencode-zen": {
+        # native_tool_history stays off: verified live (2026-07-05) that the Zen
+        # gateway deterministically 400s ("Upstream request failed") on role:"tool"
+        # messages, while the same request with text markers succeeds.
         "flavor": "openai",
         "base_url": "https://opencode.ai/zen/v1",
         "api_key_env": "ZEN_API_KEY",
@@ -93,6 +109,9 @@ BUILTIN: dict[str, dict] = {
         "auth": "bearer",
         "reasoning_models": ["deepseek-ai/deepseek-v4-flash", "deepseek-ai/deepseek-v4-pro"],
         "default_model": "deepseek-ai/deepseek-v4-flash",
+        # Verified live (2026-07-05): NIM accepts native tool history (503s seen
+        # during probing were the usual ResourceExhausted capacity flakiness).
+        "native_tool_history": True,
     },
 }
 
@@ -109,6 +128,8 @@ def _make(name: str, d: dict) -> ProviderConfig:
         min_tokens_reasoning=int(d.get("min_tokens_reasoning", MIN_TOKENS_REASONING)),
         cache_control_strip=list(d.get("cache_control_strip", [])),
         transient_error_patterns=list(d.get("transient_error_patterns", [])),
+        native_tool_history=bool(d.get("native_tool_history", False)),
+        reasoning_extra_body=dict(d.get("reasoning_extra_body", {})),
         fallbacks={k: list(v) for k, v in d.get("fallbacks", {}).items()},
         default_fallback=list(d.get("default_fallback", [])),
         default_model=d.get("default_model"),
