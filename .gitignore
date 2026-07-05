@@ -13,5 +13,9 @@ venv/
 *.log
 *.pid
 
+# Personal / local notes (machine-specific; may reference keys) — never publish
+CLAUDE.md
+CLAUDE.local.md
+
 # OS
 .DS_Store

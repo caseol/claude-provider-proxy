@@ -1,7 +1,7 @@
 # Providers
 
 A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
-`opencode-zen`, `nvidia`. Add/override in `~/.config/claude-provider-proxy/providers.json`
+`opencode-zen`, `nvidia`, `openrouter`. Add/override in `~/.config/claude-provider-proxy/providers.json`
 (deep-merged over the built-ins). Keys come from `~/.config/claude-provider-proxy/.env`.
 
 ## ProviderConfig fields
@@ -17,7 +17,8 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
 | `cache_control_strip` | List of model-name substrings; for matches, `cache_control` is stripped before forwarding (kimi rejects it) |
 | `transient_error_patterns` | List of response-body substrings that make an otherwise-fatal status (typically `400`) retryable for **this provider only** — e.g. `["Upstream request failed"]` for `opencode-go` |
 | `native_tool_history` | Replay tool history natively as `assistant.tool_calls` + `role:"tool"` messages instead of text markers. Enable only for backends verified to accept `role:"tool"`; markers stay the safe default |
-| `reasoning_extra_body` | Extra top-level request fields injected when the client requests extended thinking and the model is in `reasoning_models` — e.g. `{"chat_template_kwargs": {"thinking": true}}` for NVIDIA NIM DeepSeek |
+| `reasoning_extra_body` | Extra top-level request fields injected when the client requests extended thinking and the model is in `reasoning_models` — e.g. `{"chat_template_kwargs": {"thinking": true}}` for NVIDIA NIM DeepSeek, `{"reasoning": {"enabled": true}}` for OpenRouter |
+| `extra_headers` | Extra HTTP headers sent on every request to this provider, merged over the base headers — e.g. OpenRouter attribution `{"HTTP-Referer": "...", "X-Title": "..."}` |
 | `fallbacks` | `{model: [chain…]}` — models to try after the requested one on overload/quota/5xx |
 | `default_fallback` | Chain used when a requested model isn't in `fallbacks` |
 | `default_model` | Used when a request omits `model` |
@@ -38,6 +39,16 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
                   api_key_env:"NVIDIA_API_KEY", auth:"bearer",
                   reasoning_models:["deepseek-ai/deepseek-v4-flash","deepseek-ai/deepseek-v4-pro"],
                   native_tool_history:true }
+"openrouter":   { flavor:"openai", base_url:"https://openrouter.ai/api/v1",
+                  api_key_env:"OPENROUTER_API_KEY", auth:"bearer",
+                  extra_headers:{"HTTP-Referer":"...","X-Title":"claude-provider-proxy"},
+                  reasoning_models:["deepseek/deepseek-v4-flash","deepseek/deepseek-v4-pro"],
+                  reasoning_extra_body:{"reasoning":{"enabled":true}},
+                  default_model:"deepseek/deepseek-v4-flash",
+                  fallbacks:{"deepseek/deepseek-v4-flash":["deepseek/deepseek-v4-pro"],
+                             "deepseek/deepseek-v4-pro":["deepseek/deepseek-v4-flash"]},
+                  default_fallback:["deepseek/deepseek-v4-flash","deepseek/deepseek-v4-pro"] }
+                  // native_tool_history off until role:"tool" acceptance is verified live
 ```
 
 ## Adding a provider
@@ -65,3 +76,8 @@ upstream quirks, not genuine bad requests.
 
 For streaming, fallback only applies **before** the stream starts; once bytes flow, a
 mid-stream failure is surfaced as an `event: error` SSE frame.
+
+Set `default_fallback` as a **universal safety net**: any requested model not listed in
+`fallbacks` (e.g. the OPUS/SONNET/HAIKU slot slugs a profile might request) falls through
+to it. Without one, a `429`/`503` on an unlisted slug ends the turn with "fallback chain
+exhausted". The `openrouter` built-in ships both a per-model chain and a `default_fallback`.

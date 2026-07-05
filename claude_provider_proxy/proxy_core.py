@@ -69,6 +69,8 @@ def _headers(provider: ProviderConfig, anthropic: bool) -> dict:
         h["anthropic-version"] = "2023-06-01"
     if provider.user_agent:
         h["user-agent"] = provider.user_agent
+    for k, v in provider.extra_headers.items():
+        h[k] = v
     return h
 
 

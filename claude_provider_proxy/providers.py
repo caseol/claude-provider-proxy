@@ -49,6 +49,9 @@ class ProviderConfig:
     # reasoning_models — each backend names its reasoning knob differently, e.g.
     # NVIDIA NIM DeepSeek: {"chat_template_kwargs": {"thinking": true}}.
     reasoning_extra_body: dict = field(default_factory=dict)
+    # Headers HTTP extras enviados em todo request a este provider (ex. atribuição
+    # do OpenRouter: HTTP-Referer / X-Title). Mesclados por cima dos headers base.
+    extra_headers: dict = field(default_factory=dict)
     fallbacks: dict[str, list[str]] = field(default_factory=dict)  # model -> chain
     default_fallback: list[str] = field(default_factory=list)
     default_model: str | None = None
@@ -122,6 +125,33 @@ BUILTIN: dict[str, dict] = {
         # during probing were the usual ResourceExhausted capacity flakiness).
         "native_tool_history": True,
     },
+    "openrouter": {
+        # OpenRouter: agregador OpenAI-compatível (centenas de modelos, uma chave).
+        "flavor": "openai",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "auth": "bearer",
+        # Headers de atribuição recomendados pelo OpenRouter (aparecem no ranking
+        # público e nos logs da conta). Opcionais para funcionar, mas boa prática.
+        "extra_headers": {
+            "HTTP-Referer": "https://github.com/claude-provider-proxy",
+            "X-Title": "claude-provider-proxy",
+        },
+        # DeepSeek v4 no OpenRouter suporta reasoning (supported_parameters: reasoning,
+        # effort xhigh/high). O knob unificado do OpenRouter é o campo `reasoning`.
+        "reasoning_models": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"],
+        "reasoning_extra_body": {"reasoning": {"enabled": True}},
+        "default_model": "deepseek/deepseek-v4-flash",
+        # Fallback robusto: os dois DeepSeek são reserva um do outro, e default_fallback
+        # é a rede de segurança universal para qualquer slug fora do dict (ex. slots
+        # OPUS/SONNET/HAIKU de um profile) — sem ele, um 429/503 encerraria o turno.
+        "fallbacks": {
+            "deepseek/deepseek-v4-flash": ["deepseek/deepseek-v4-pro"],
+            "deepseek/deepseek-v4-pro": ["deepseek/deepseek-v4-flash"],
+        },
+        "default_fallback": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"],
+        # native_tool_history desligado até verificar ao vivo o aceite de role:"tool".
+    },
 }
 
 
@@ -139,6 +169,7 @@ def _make(name: str, d: dict) -> ProviderConfig:
         transient_error_patterns=list(d.get("transient_error_patterns", [])),
         native_tool_history=bool(d.get("native_tool_history", False)),
         reasoning_extra_body=dict(d.get("reasoning_extra_body", {})),
+        extra_headers=dict(d.get("extra_headers", {})),
         fallbacks={k: list(v) for k, v in d.get("fallbacks", {}).items()},
         default_fallback=list(d.get("default_fallback", [])),
         default_model=d.get("default_model"),
