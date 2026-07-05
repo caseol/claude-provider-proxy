@@ -20,6 +20,7 @@
     "api_key_env": "EXAMPLE_API_KEY",
     "auth": "bearer",
     "reasoning_models": [],
-    "cache_control_strip": []
+    "cache_control_strip": [],
+    "transient_error_patterns": []
   }
 }

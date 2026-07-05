@@ -44,6 +44,14 @@ def _flatten_blocks(content) -> str:
                          f"input={json.dumps(block.get('input', {}))}]")
         elif t == "tool_result":
             parts.append(f"[tool_result: {json.dumps(block.get('content', ''))}]")
+        elif t == "thinking":
+            parts.append(f"[thinking: {block.get('thinking', '')}]")
+        elif t == "redacted_thinking":
+            parts.append(f"[redacted_thinking: {block.get('data', '')}]")
+        elif t == "document":
+            src = block.get("source") or {}
+            label = block.get("title") or src.get("media_type") or src.get("type") or "unknown"
+            parts.append(f"[document: {label}]")
         else:
             parts.append(str(block))
     return "\n".join(parts)
@@ -53,13 +61,17 @@ def _flatten_system(system) -> str:
     if isinstance(system, str):
         return system
     if isinstance(system, list):
-        return "\n".join(b.get("text", "") for b in system
-                         if isinstance(b, dict) and b.get("type") == "text")
+        return _flatten_blocks(system)
     return str(system or "")
 
 
+def _non_empty(s: str, placeholder: str) -> str:
+    return s if s.strip() else placeholder
+
+
 def convert_messages(messages: list[dict]) -> list[dict]:
-    return [{"role": m.get("role", "user"), "content": _flatten_blocks(m.get("content", ""))}
+    return [{"role": m.get("role", "user"),
+             "content": _non_empty(_flatten_blocks(m.get("content", "")), "[empty message]")}
             for m in messages]
 
 
@@ -102,9 +114,30 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
                         for t in body["tools"]]
     if "stop_sequences" in body:
         out["stop"] = body["stop_sequences"]
+    if "tool_choice" in body:
+        mapped = _map_tool_choice(body["tool_choice"])
+        if mapped is not None:
+            out["tool_choice"] = mapped
+    if "top_p" in body:
+        out["top_p"] = body["top_p"]
+    # Intentionally not forwarded: top_k, metadata, parallel_tool_calls — no clean
+    # OpenAI Chat Completions equivalent.
     if out["stream"]:
         out["stream_options"] = {"include_usage": True}
     return out
+
+
+def _map_tool_choice(tc):
+    if not isinstance(tc, dict):
+        return None
+    t = tc.get("type")
+    if t == "auto":
+        return "auto"
+    if t == "any":
+        return "required"
+    if t == "tool" and tc.get("name"):
+        return {"type": "function", "function": {"name": tc["name"]}}
+    return None
 
 
 # ---------- embedded tool-marker parser (round-trip partner of _flatten_blocks) ----------

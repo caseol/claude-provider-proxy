@@ -34,6 +34,11 @@ class ProviderConfig:
     reasoning_models: set[str] = field(default_factory=set)
     min_tokens_reasoning: int = MIN_TOKENS_REASONING
     cache_control_strip: list[str] = field(default_factory=list)  # model substrings
+    # Body substrings that make an otherwise-fatal status (typically 400) retryable for
+    # this provider only. E.g. OpenCode Go returns a generic 400 "invalid_request_error"
+    # for what are actually transient backend hiccups (confirmed against oc-go-cc's own
+    # logs, which retry through its fallback chain on this same error).
+    transient_error_patterns: list[str] = field(default_factory=list)
     fallbacks: dict[str, list[str]] = field(default_factory=dict)  # model -> chain
     default_fallback: list[str] = field(default_factory=list)
     default_model: str | None = None
@@ -54,6 +59,9 @@ class ProviderConfig:
         m = (model or "").lower()
         return any(sub.lower() in m for sub in self.cache_control_strip)
 
+    def matches_transient_pattern(self, body_text: str) -> bool:
+        return any(p in (body_text or "") for p in self.transient_error_patterns)
+
 
 BUILTIN: dict[str, dict] = {
     "opencode-go": {
@@ -67,6 +75,7 @@ BUILTIN: dict[str, dict] = {
         "reasoning_models": ["kimi-k2.7-code", "qwen3.7-max", "qwen3.7-plus",
                              "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2"],
         "default_model": "kimi-k2.7-code",
+        "transient_error_patterns": ["Upstream request failed"],
     },
     "opencode-zen": {
         "flavor": "openai",
@@ -99,6 +108,7 @@ def _make(name: str, d: dict) -> ProviderConfig:
         reasoning_models=set(d.get("reasoning_models", [])),
         min_tokens_reasoning=int(d.get("min_tokens_reasoning", MIN_TOKENS_REASONING)),
         cache_control_strip=list(d.get("cache_control_strip", [])),
+        transient_error_patterns=list(d.get("transient_error_patterns", [])),
         fallbacks={k: list(v) for k, v in d.get("fallbacks", {}).items()},
         default_fallback=list(d.get("default_fallback", [])),
         default_model=d.get("default_model"),

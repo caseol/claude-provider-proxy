@@ -109,7 +109,10 @@ See [`examples/curl_examples.sh`](examples/curl_examples.sh).
 
 - **Tool calls** are round-tripped as text markers (`[tool_use: …]`) in addition to native OpenAI `tool_calls`, so backends without native tool support still work — but fidelity depends on the model emitting the marker format.
 - **Images** in the OpenAI flavor are dropped (replaced with `[image content]`).
-- **Fallback** triggers on connection errors / 429 / 5xx — not on hard `400`s (e.g. "model not supported"), which return as-is.
+- **Fallback** triggers on connection errors / 429 / 5xx, and on `400`s only when a provider
+  explicitly marks the error body as transient via `transient_error_patterns` (e.g. OpenCode
+  Go's generic "Upstream request failed"). Other hard `400`s (e.g. "model not supported")
+  return as-is.
 - **OpenCode Go** is called directly (no `oc-go-cc` binary); the binary's scenario-routing (auto long-context switch, per-scenario temps) is **not** reproduced — Claude Code pins models per slot anyway.
 - Single-machine, `127.0.0.1` only. Keys live in one local `.env`.
 

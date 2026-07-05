@@ -66,6 +66,99 @@ def test_tools_and_stop_translation():
     assert o["stop"] == ["END"]
 
 
+def test_thinking_block_preserves_text():
+    body = {"model": "m", "messages": [{"role": "assistant", "content": [
+        {"type": "thinking", "thinking": "let me think..."},
+    ]}]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert o["messages"][0]["content"] == "[thinking: let me think...]"
+
+
+def test_redacted_thinking_block_placeholder():
+    body = {"model": "m", "messages": [{"role": "assistant", "content": [
+        {"type": "redacted_thinking", "data": "opaque-blob"},
+    ]}]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert o["messages"][0]["content"] == "[redacted_thinking: opaque-blob]"
+
+
+def test_document_block_placeholder_with_title():
+    body = {"model": "m", "messages": [{"role": "user", "content": [
+        {"type": "document", "title": "invoice.pdf",
+         "source": {"media_type": "application/pdf", "type": "base64"}},
+    ]}]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert o["messages"][0]["content"] == "[document: invoice.pdf]"
+
+
+def test_document_block_placeholder_media_type_fallback():
+    body = {"model": "m", "messages": [{"role": "user", "content": [
+        {"type": "document", "source": {"media_type": "application/pdf"}},
+    ]}]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert o["messages"][0]["content"] == "[document: application/pdf]"
+
+
+def test_document_block_placeholder_missing_fields():
+    body = {"model": "m", "messages": [{"role": "user", "content": [{"type": "document"}]}]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert o["messages"][0]["content"] == "[document: unknown]"
+
+
+def test_unknown_block_type_still_falls_through():
+    body = {"model": "m", "messages": [{"role": "user", "content": [
+        {"type": "some_future_block", "foo": "bar"},
+    ]}]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert "some_future_block" in o["messages"][0]["content"]
+
+
+def test_flatten_system_preserves_nontext_blocks():
+    """Regression: non-text system blocks used to vanish silently (worse than the
+    legacy nv-proxy, which at least stringified them)."""
+    body = {"model": "m",
+            "system": [{"type": "text", "text": "A"},
+                       {"type": "document", "title": "spec.pdf"}],
+            "messages": [{"role": "user", "content": "x"}]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert o["messages"][0]["content"] == "A\n[document: spec.pdf]"
+
+
+def test_empty_content_gets_placeholder():
+    body = {"model": "m", "messages": [{"role": "assistant", "content": []}]}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert o["messages"][0]["content"] == "[empty message]"
+
+
+def test_tool_choice_auto_any_specific():
+    base = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+    assert tx.anthropic_to_openai({**base, "tool_choice": {"type": "auto"}}, ZEN)["tool_choice"] == "auto"
+    assert tx.anthropic_to_openai({**base, "tool_choice": {"type": "any"}}, ZEN)["tool_choice"] == "required"
+    specific = tx.anthropic_to_openai(
+        {**base, "tool_choice": {"type": "tool", "name": "grep"}}, ZEN)["tool_choice"]
+    assert specific == {"type": "function", "function": {"name": "grep"}}
+
+
+def test_tool_choice_absent_or_unrecognized_is_omitted():
+    base = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+    assert "tool_choice" not in tx.anthropic_to_openai(base, ZEN)
+    weird = {**base, "tool_choice": {"type": "something_new"}}
+    assert "tool_choice" not in tx.anthropic_to_openai(weird, ZEN)
+
+
+def test_top_p_passthrough():
+    base = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+    assert "top_p" not in tx.anthropic_to_openai(base, ZEN)
+    assert tx.anthropic_to_openai({**base, "top_p": 0.9}, ZEN)["top_p"] == 0.9
+
+
+def test_top_k_metadata_parallel_tool_calls_not_forwarded():
+    body = {"model": "m", "messages": [{"role": "user", "content": "x"}],
+            "top_k": 40, "metadata": {"user_id": "abc"}, "parallel_tool_calls": False}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert "top_k" not in o and "metadata" not in o and "parallel_tool_calls" not in o
+
+
 # ---- response translation ----
 
 def test_openai_response_text_and_tools():
@@ -129,6 +222,21 @@ def test_cache_control_strip_rule():
                        api_key_env="K", cache_control_strip=["kimi"])
     assert p.strip_cache_control_for("kimi-k2.7-code") is True
     assert p.strip_cache_control_for("deepseek-v4-flash") is False
+
+
+def test_matches_transient_pattern_builtin_opencode_go():
+    go = load_providers()["opencode-go"]
+    body = ('{"error":{"message":"Error from provider (Console Go): '
+            'Upstream request failed","type":"invalid_request_error"}}')
+    assert go.matches_transient_pattern(body) is True
+    assert go.matches_transient_pattern('{"error":{"message":"model not supported"}}') is False
+
+
+def test_matches_transient_pattern_default_empty():
+    """Providers without an explicit transient_error_patterns override (e.g. zen,
+    nvidia) never treat a 400 as retryable, matching pre-incident behavior."""
+    assert ZEN.transient_error_patterns == []
+    assert ZEN.matches_transient_pattern("Upstream request failed") is False
 
 
 def test_normalize_content_string_to_blocks():
@@ -249,3 +357,204 @@ def test_handle_openai_mid_stream_timeout_yields_sse_error(monkeypatch):
     joined = "".join(events)
     assert "text_delta" in joined      # the pre-timeout chunk still made it through
     assert "event: error" in joined    # and the stall surfaces cleanly, not a dead socket
+
+
+# ---- retry classification: transient_error_patterns (scoped 400 retry) ----
+
+def test_handle_openai_transient_pattern_retries_chain(monkeypatch):
+    """A 400 whose body matches the provider's transient_error_patterns retries the
+    fallback chain instead of failing immediately (opencode-go's 'Upstream request
+    failed' quirk — confirmed against oc-go-cc's own logs, which recover the same way)."""
+    import asyncio
+
+    provider = ProviderConfig(name="go", flavor="openai", base_url="http://u",
+                              api_key_env="K", default_fallback=["m2"],
+                              transient_error_patterns=["Upstream request failed"])
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status, text, json_body=None):
+            self.status_code = status
+            self.text = text
+            self._json = json_body
+
+        def json(self):
+            return self._json
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def post(self, url, headers=None, json=None):
+            calls.append(json["model"])
+            if json["model"] == "m1":
+                return FakeResp(400, '{"error":{"message":"Upstream request failed"}}')
+            return FakeResp(200, "", {"choices": [{"message": {"content": "ok"}}], "usage": {}})
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(proxy_core.httpx, "AsyncClient", FakeClient)
+
+    async def run():
+        return await proxy_core.handle_openai(
+            provider, {"model": "m1", "messages": [{"role": "user", "content": "hi"}]})
+
+    status, result = asyncio.run(run())
+    assert calls == ["m1", "m2"]
+    assert status == 200
+
+
+def test_handle_openai_non_matching_400_is_fatal_preserves_message(monkeypatch):
+    """A 400 that doesn't match any configured pattern is fatal and immediate — no
+    wasted round-trips through the fallback chain, and the real error isn't buried."""
+    import asyncio
+
+    provider = ProviderConfig(name="go", flavor="openai", base_url="http://u",
+                              api_key_env="K", default_fallback=["m2"],
+                              transient_error_patterns=["Upstream request failed"])
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status, text):
+            self.status_code = status
+            self.text = text
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def post(self, url, headers=None, json=None):
+            calls.append(json["model"])
+            return FakeResp(400, '{"error":{"message":"model not supported"}}')
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(proxy_core.httpx, "AsyncClient", FakeClient)
+
+    async def run():
+        return await proxy_core.handle_openai(
+            provider, {"model": "m1", "messages": [{"role": "user", "content": "hi"}]})
+
+    status, result = asyncio.run(run())
+    assert calls == ["m1"]
+    assert status == 400
+    assert "model not supported" in result["error"]["message"]
+
+
+def test_handle_openai_400_fatal_when_provider_has_no_transient_patterns(monkeypatch):
+    """Same error text that would match opencode-go's pattern stays fatal for a
+    provider (e.g. zen/nvidia) that hasn't opted into transient_error_patterns —
+    the mechanism is scoped per-provider, not global."""
+    import asyncio
+
+    assert ZEN.transient_error_patterns == []
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status, text):
+            self.status_code = status
+            self.text = text
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def post(self, url, headers=None, json=None):
+            calls.append(json["model"])
+            return FakeResp(400, "Upstream request failed")
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(proxy_core.httpx, "AsyncClient", FakeClient)
+
+    async def run():
+        return await proxy_core.handle_openai(
+            ZEN, {"model": ZEN.default_model, "messages": [{"role": "user", "content": "hi"}]})
+
+    status, result = asyncio.run(run())
+    assert calls == [ZEN.default_model]
+    assert status == 400
+
+
+def test_handle_anthropic_passthrough_success_and_cache_strip(monkeypatch):
+    """Minimal smoke test for the (currently unused-by-any-built-in-provider, but
+    live) 'anthropic' passthrough flavor: success path + cache_control stripping."""
+    import asyncio
+
+    provider = ProviderConfig(name="anthro", flavor="anthropic", base_url="http://u",
+                              api_key_env="K", cache_control_strip=["kimi"])
+    seen_bodies = []
+
+    class FakeResp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"type": "message", "content": [{"type": "text", "text": "hi"}]}
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def post(self, url, headers=None, json=None):
+            seen_bodies.append(json)
+            return FakeResp()
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(proxy_core.httpx, "AsyncClient", FakeClient)
+
+    async def run():
+        return await proxy_core.handle_anthropic(
+            provider, {"model": "kimi-k2.7-code", "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}]}]})
+
+    status, result = asyncio.run(run())
+    assert status == 200
+    assert result["content"][0]["text"] == "hi"
+    assert "cache_control" not in seen_bodies[0]["messages"][0]["content"][0]
+
+
+def test_handle_anthropic_transient_pattern_retries_chain(monkeypatch):
+    import asyncio
+
+    provider = ProviderConfig(name="anthro", flavor="anthropic", base_url="http://u",
+                              api_key_env="K", default_fallback=["m2"],
+                              transient_error_patterns=["Upstream request failed"])
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status, text, json_body=None):
+            self.status_code = status
+            self.text = text
+            self._json = json_body
+
+        def json(self):
+            return self._json
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def post(self, url, headers=None, json=None):
+            calls.append(json["model"])
+            if json["model"] == "m1":
+                return FakeResp(400, '{"error":"Upstream request failed"}')
+            return FakeResp(200, "", {"type": "message", "content": []})
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(proxy_core.httpx, "AsyncClient", FakeClient)
+
+    async def run():
+        return await proxy_core.handle_anthropic(
+            provider, {"model": "m1", "messages": [{"role": "user", "content": "hi"}]})
+
+    status, result = asyncio.run(run())
+    assert calls == ["m1", "m2"]
+    assert status == 200

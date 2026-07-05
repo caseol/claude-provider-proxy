@@ -79,15 +79,13 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                 # open the stream; only fall back on pre-stream failures
                 req = client.build_request("POST", url, headers=headers, json=oai)
                 resp = await client.send(req, stream=True)
-                if resp.status_code in RETRYABLE_STATUS:
-                    txt = (await resp.aread()).decode("utf-8", "replace")
-                    await resp.aclose(); await client.aclose()
-                    log.warning("%s: %s -> %s (pre-stream), falling back",
-                                provider.name, model, resp.status_code)
-                    last_err = _err(resp.status_code, txt[:300]); continue
                 if resp.status_code != 200:
                     txt = (await resp.aread()).decode("utf-8", "replace")
                     await resp.aclose(); await client.aclose()
+                    if resp.status_code in RETRYABLE_STATUS or provider.matches_transient_pattern(txt):
+                        log.warning("%s: %s -> %s (pre-stream), falling back",
+                                    provider.name, model, resp.status_code)
+                        last_err = _err(resp.status_code, txt[:300]); continue
                     log.warning("%s: %s -> %s (pre-stream), non-retryable",
                                 provider.name, model, resp.status_code)
                     return resp.status_code, _err(resp.status_code, txt[:300])
@@ -106,11 +104,11 @@ async def handle_openai(provider: ProviderConfig, body: dict):
             else:
                 resp = await client.post(url, headers=headers, json=oai)
                 await client.aclose()
-                if resp.status_code in RETRYABLE_STATUS:
-                    log.warning("%s: %s -> %s, falling back",
-                                provider.name, model, resp.status_code)
-                    last_err = _err(resp.status_code, resp.text[:300]); continue
                 if resp.status_code != 200:
+                    if resp.status_code in RETRYABLE_STATUS or provider.matches_transient_pattern(resp.text):
+                        log.warning("%s: %s -> %s, falling back",
+                                    provider.name, model, resp.status_code)
+                        last_err = _err(resp.status_code, resp.text[:300]); continue
                     return resp.status_code, _err(resp.status_code, resp.text[:300])
                 return 200, tx.openai_to_anthropic_response(resp.json(), model)
         except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException) as e:
@@ -145,15 +143,13 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
             if stream:
                 req = client.build_request("POST", url, headers=headers, json=out)
                 resp = await client.send(req, stream=True)
-                if resp.status_code in RETRYABLE_STATUS:
-                    txt = (await resp.aread()).decode("utf-8", "replace")
-                    await resp.aclose(); await client.aclose()
-                    log.warning("%s: %s -> %s (pre-stream), falling back",
-                                provider.name, model, resp.status_code)
-                    last_err = _err(resp.status_code, txt[:300]); continue
                 if resp.status_code != 200:
                     txt = (await resp.aread()).decode("utf-8", "replace")
                     await resp.aclose(); await client.aclose()
+                    if resp.status_code in RETRYABLE_STATUS or provider.matches_transient_pattern(txt):
+                        log.warning("%s: %s -> %s (pre-stream), falling back",
+                                    provider.name, model, resp.status_code)
+                        last_err = _err(resp.status_code, txt[:300]); continue
                     log.warning("%s: %s -> %s (pre-stream), non-retryable",
                                 provider.name, model, resp.status_code)
                     return resp.status_code, _err(resp.status_code, txt[:300])
@@ -172,7 +168,8 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
             else:
                 resp = await client.post(url, headers=headers, json=out)
                 await client.aclose()
-                if resp.status_code in RETRYABLE_STATUS:
+                if resp.status_code != 200 and (resp.status_code in RETRYABLE_STATUS
+                                                 or provider.matches_transient_pattern(resp.text)):
                     log.warning("%s: %s -> %s, falling back",
                                 provider.name, model, resp.status_code)
                     last_err = _err(resp.status_code, resp.text[:300]); continue

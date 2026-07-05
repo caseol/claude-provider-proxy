@@ -26,8 +26,12 @@ Every model in the chain hit a retryable error (often a quota/usage limit on a p
 provider) or a connection failure. Check the provider's quota; switch provider/profile.
 
 ### A model error that *should* fall back doesn't
-Fallback triggers on `429`/`5xx`/connection errors, not on hard `400`s ("model not
-supported"). Fix the model name or add it to a `fallbacks` chain whose first entry is valid.
+Fallback triggers on `429`/`5xx`/connection errors, and on `400`s only when the provider's
+`transient_error_patterns` matches the error body (built in for `opencode-go`'s generic
+"Upstream request failed"). A `400` that doesn't match any pattern is a hard client error
+("model not supported", bad schema, etc.) — fix the model name, add it to a `fallbacks`
+chain whose first entry is valid, or add a matching substring to that provider's
+`transient_error_patterns` if you've confirmed the error is actually transient.
 
 ### Tool calls look wrong on a non-native backend
 The backend must emit the `[tool_use: name id=… input={…}]` marker (or native OpenAI
