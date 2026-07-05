@@ -111,15 +111,24 @@ The slots become the env vars Claude Code reads to request a model per tier:
 | `HAIKU_MODEL` | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Haiku (fast/background) |
 | `SUBAGENT_MODEL` | `CLAUDE_CODE_SUBAGENT_MODEL` | Subagents |
 
-```bash
-# scaffold a profile (all five slots seeded with the provider default), then edit it
-claude-proxy profile openrouter new fast
-$EDITOR ~/.config/claude-provider-proxy/profiles/openrouter/fast.env
+No profile is required to start — `claude-proxy <provider>` maps every slot to the
+provider default (e.g. `deepseek/deepseek-v4-flash` for `openrouter`). Create a profile
+only when you want per-tier control.
 
+Profiles are managed with the **`profile`** subcommand (provider comes *after* it):
+
+```bash
 claude-proxy profile openrouter list            # tables profiles + slots, marks active
+claude-proxy profile openrouter new fast        # scaffold (5 slots seeded with the provider default)
+$EDITOR ~/.config/claude-provider-proxy/profiles/openrouter/fast.env
 claude-proxy profile openrouter show [name]     # print a profile (active if omitted)
 claude-proxy profile openrouter use fast        # set active ('none'/'clear' to reset to defaults)
 ```
+
+> **Mind the syntax.** `claude-proxy profile openrouter list` **manages** profiles, whereas
+> `claude-proxy openrouter --profile <name>` **launches** Claude Code with an existing
+> profile. So `claude-proxy openrouter --profile list` looks for a profile literally named
+> `list` (and fails) — it does not list anything.
 
 Example `profiles/openrouter/fast.env` — cheap workhorse, a stronger model reserved for Opus:
 
@@ -135,6 +144,10 @@ SUBAGENT_MODEL=deepseek/deepseek-v4-flash
 `active_profile` file → the built-in provider default for any unset slot. Model names are
 whatever the backend expects (OpenRouter/NVIDIA slugs are namespaced, e.g.
 `deepseek/deepseek-v4-flash`). See [docs/PROFILES.md](docs/PROFILES.md).
+
+Ready-made per-family profiles for OpenRouter (Claude, DeepSeek, Qwen, Kimi) ship in
+[`examples/profiles/openrouter/`](examples/profiles/openrouter/) — copy one into
+`~/.config/claude-provider-proxy/profiles/openrouter/<name>.env` to get started.
 
 ### Call the API directly
 

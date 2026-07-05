@@ -43,6 +43,26 @@ claude-proxy profile <provider> new <name>     # scaffold a profile
 claude-proxy nvidia --profile fast
 ```
 
+## Example profiles
+
+Ready-made per-family profiles for `openrouter` (copy into
+`~/.config/claude-provider-proxy/profiles/openrouter/<name>.env`, dropping the `.example`
+suffix):
+
+| File | Family | Flagship (Opus/Fable) | Workhorse (Sonnet/Subagent) | Fast (Haiku) |
+|---|---|---|---|---|
+| [`classic.env.example`](../examples/profiles/openrouter/classic.env.example) | Claude (native, via OpenRouter) | `claude-opus-4.8` | `claude-sonnet-5` | `claude-haiku-4.5` |
+| [`deepseek.env.example`](../examples/profiles/openrouter/deepseek.env.example) | DeepSeek v4 | `deepseek-v4-pro` | `deepseek-v4-flash` | `deepseek-v4-flash` |
+| [`qwen.env.example`](../examples/profiles/openrouter/qwen.env.example) | Qwen3 | `qwen3.7-max` | `qwen3.7-plus` | `qwen3.6-flash` |
+| [`kimi.env.example`](../examples/profiles/openrouter/kimi.env.example) | Kimi (Moonshot AI) | `kimi-k2.7-code` | `kimi-k2.5` | `kimi-k2` |
+
+```bash
+mkdir -p ~/.config/claude-provider-proxy/profiles/openrouter
+cp examples/profiles/openrouter/deepseek.env.example \
+   ~/.config/claude-provider-proxy/profiles/openrouter/deepseek.env
+claude-proxy profile openrouter use deepseek
+```
+
 ## Fallbacks
 
 Per-slot fallback now lives in the provider's `fallbacks` (see [PROVIDERS.md](PROVIDERS.md)),
