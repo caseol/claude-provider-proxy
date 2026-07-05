@@ -12,6 +12,7 @@ backends that don't support native OpenAI tool_calls, in addition to native tool
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import AsyncIterator
 
@@ -19,6 +20,8 @@ from .providers import ProviderConfig
 
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TEMPERATURE = 0.7
+
+log = logging.getLogger("claude_provider_proxy")
 
 
 # ---------- request: Anthropic -> OpenAI ----------
@@ -142,23 +145,36 @@ def _map_tool_choice(tc):
 
 # ---------- embedded tool-marker parser (round-trip partner of _flatten_blocks) ----------
 
+TOOL_MARKER_PREFIX = "[tool_use: "
+
+
 def find_tool_use_blocks(text: str) -> list[dict]:
-    blocks, i, marker = [], 0, "[tool_use: "
+    blocks, i = [], 0
     while True:
-        start = text.find(marker, i)
+        start = text.find(TOOL_MARKER_PREFIX, i)
         if start < 0:
             break
-        j = start + len(marker)
-        name_end = text.find(" id=", j)
-        id_end = text.find(" input=", name_end) if name_end >= 0 else -1
+        j = start + len(TOOL_MARKER_PREFIX)
+        # Bound the header search to end before the next marker occurrence (if any), so
+        # a malformed header (e.g. the model used "params=" instead of "input=") can't
+        # accidentally match a *later*, unrelated marker's " id="/" input=" and misparse
+        # across the boundary between the two.
+        next_marker = text.find(TOOL_MARKER_PREFIX, j)
+        scope_end = next_marker if next_marker >= 0 else len(text)
+        name_end = text.find(" id=", j, scope_end)
+        id_end = text.find(" input=", name_end, scope_end) if name_end >= 0 else -1
         if name_end < 0 or id_end < 0:
-            break
+            # Malformed marker header for this occurrence — skip past just it and keep
+            # scanning, so a well-formed marker elsewhere in the same text still parses.
+            i = j
+            continue
         name = text[j:name_end].strip()
         tid = text[name_end + 4:id_end].strip()
         # brace-match the JSON input
-        k = text.find("{", id_end)
+        k = text.find("{", id_end, scope_end)
         if k < 0:
-            break
+            i = j
+            continue
         depth, p, in_str, esc = 0, k, False, False
         while p < len(text):
             c = text[p]
@@ -222,6 +238,9 @@ def openai_to_anthropic_response(data: dict, model: str) -> dict:
     text = msg.get("content")
     if text:
         mixed = split_text_and_tools(text)
+        if mixed is None and TOOL_MARKER_PREFIX in text:
+            log.warning("model=%s emitted a %r marker that failed to parse; "
+                        "falling back to raw text: %.200r", model, TOOL_MARKER_PREFIX, text)
         content.extend(mixed if mixed else [{"type": "text", "text": text}])
 
     for tc in (msg.get("tool_calls") or []):
@@ -333,7 +352,11 @@ async def stream_anthropic_events(lines: AsyncIterator[str], model: str) -> Asyn
                    "content_block": {"type": "text", "text": joined}})
         yield _sse("content_block_stop", {"type": "content_block_stop", "index": 0})
     elif text_open:
-        mixed = split_text_and_tools("".join(full_text))
+        joined = "".join(full_text)
+        mixed = split_text_and_tools(joined)
+        if mixed is None and TOOL_MARKER_PREFIX in joined:
+            log.warning("model=%s emitted a %r marker that failed to parse mid-stream; "
+                        "falling back to raw text: %.200r", model, TOOL_MARKER_PREFIX, joined)
         for b in (mixed or []):
             if b["type"] == "tool_use":
                 for ev in _emit_tool(b["id"], b["name"], None, b["input"]):

@@ -182,6 +182,51 @@ def test_embedded_tool_marker_parsing():
     assert tu["name"] == "ls" and tu["input"] == {"path": "/x"}
 
 
+def test_malformed_marker_is_skipped_not_fatal_to_the_whole_scan():
+    """Regression: a model can garble one marker's header (e.g. emitting "params="
+    instead of "input=", observed from nemotron-3-ultra-free on a complex multi-line
+    command) — a single malformed occurrence must not blind the parser to a
+    well-formed marker elsewhere in the same text."""
+    text = ('junk [tool_use: Bash id="x"="Bash" params={"command": "a"}] middle '
+            '[tool_use: ls id=t2 input={"path": "/x"}] tail')
+    blocks = tx.find_tool_use_blocks(text)
+    assert len(blocks) == 1
+    assert blocks[0]["name"] == "ls" and blocks[0]["id"] == "t2"
+    assert blocks[0]["input"] == {"path": "/x"}
+
+
+def test_malformed_marker_only_returns_no_blocks():
+    text = 'oops [tool_use: Bash id="x"="Bash" params={"command": "a"}] done'
+    assert tx.find_tool_use_blocks(text) == []
+    assert tx.split_text_and_tools(text) is None
+
+
+def test_unparsed_marker_logs_warning(caplog):
+    """A malformed marker that never resolves into a tool_use block must at least
+    leave a trace in the daemon logs — previously this failure was 100% silent
+    server-side and only discoverable by reading the Claude Code session transcript."""
+    import logging
+
+    data = {"id": "x", "choices": [{"finish_reason": "stop", "message": {
+        "content": 'oops [tool_use: Bash id="x"="Bash" params={"command": "a"}] done'}}],
+        "usage": {}}
+    with caplog.at_level(logging.WARNING, logger="claude_provider_proxy"):
+        result = tx.openai_to_anthropic_response(data, "nemotron-3-ultra-free")
+    assert result["content"][0]["type"] == "text"
+    assert any("failed to parse" in r.message for r in caplog.records)
+
+
+def test_well_formed_marker_does_not_log_warning(caplog):
+    import logging
+
+    data = {"id": "x", "choices": [{"finish_reason": "stop", "message": {
+        "content": 'do this [tool_use: ls id=t1 input={"path": "/x"}] done'}}],
+        "usage": {}}
+    with caplog.at_level(logging.WARNING, logger="claude_provider_proxy"):
+        tx.openai_to_anthropic_response(data, "m")
+    assert not any("failed to parse" in r.message for r in caplog.records)
+
+
 def test_map_stop_reason():
     assert tx.map_stop_reason("length") == "max_tokens"
     assert tx.map_stop_reason("stop") == "end_turn"
