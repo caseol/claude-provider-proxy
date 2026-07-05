@@ -133,7 +133,8 @@ def test_empty_content_gets_placeholder():
 
 
 def test_tool_choice_auto_any_specific():
-    base = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+    base = {"model": "m", "messages": [{"role": "user", "content": "x"}],
+            "tools": [{"name": "grep", "description": "d", "input_schema": {"type": "object"}}]}
     assert tx.anthropic_to_openai({**base, "tool_choice": {"type": "auto"}}, ZEN)["tool_choice"] == "auto"
     assert tx.anthropic_to_openai({**base, "tool_choice": {"type": "any"}}, ZEN)["tool_choice"] == "required"
     specific = tx.anthropic_to_openai(
@@ -142,10 +143,20 @@ def test_tool_choice_auto_any_specific():
 
 
 def test_tool_choice_absent_or_unrecognized_is_omitted():
-    base = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+    base = {"model": "m", "messages": [{"role": "user", "content": "x"}],
+            "tools": [{"name": "grep", "description": "d", "input_schema": {"type": "object"}}]}
     assert "tool_choice" not in tx.anthropic_to_openai(base, ZEN)
     weird = {**base, "tool_choice": {"type": "something_new"}}
     assert "tool_choice" not in tx.anthropic_to_openai(weird, ZEN)
+
+
+def test_empty_tools_array_is_omitted():
+    """Claude Code sends tools: [] on tool-less background calls; NIM 400s on an
+    empty tools array, so the field (and any tool_choice) must be dropped."""
+    body = {"model": "m", "messages": [{"role": "user", "content": "x"}],
+            "tools": [], "tool_choice": {"type": "auto"}}
+    o = tx.anthropic_to_openai(body, ZEN)
+    assert "tools" not in o and "tool_choice" not in o
 
 
 def test_top_p_passthrough():
@@ -759,3 +770,23 @@ def test_handle_anthropic_transient_pattern_retries_chain(monkeypatch):
     status, result = asyncio.run(run())
     assert calls == ["m1", "m2"]
     assert status == 200
+
+
+# ---- reasoning_content rescue (NIM-style reasoning models) ----
+
+def test_reasoning_only_response_surfaces_reasoning_as_text():
+    """A reasoning model that spends the whole budget thinking returns empty content;
+    the reasoning must be surfaced instead of an empty turn."""
+    data = {"choices": [{"message": {"content": "", "reasoning_content": "thinking hard"},
+                         "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 2}}
+    r = tx.openai_to_anthropic_response(data, "m")
+    assert r["content"] == [{"type": "text", "text": "thinking hard"}]
+    assert r["stop_reason"] == "max_tokens"
+
+
+def test_reasoning_ignored_when_content_present():
+    data = {"choices": [{"message": {"content": "answer", "reasoning_content": "cot"},
+                         "finish_reason": "stop"}], "usage": {}}
+    r = tx.openai_to_anthropic_response(data, "m")
+    assert r["content"] == [{"type": "text", "text": "answer"}]

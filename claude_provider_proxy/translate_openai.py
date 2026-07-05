@@ -160,7 +160,9 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
     # Moonshot) reject any value other than their default ("only 1 is allowed").
     if "temperature" in body:
         out["temperature"] = body["temperature"]
-    if "tools" in body:
+    # Claude Code sends "tools": [] on tool-less background calls; some backends
+    # (e.g. NVIDIA NIM) 400 on an empty tools array — omit the field instead.
+    if body.get("tools"):
         out["tools"] = [{"type": "function",
                          "function": {"name": t["name"],
                                       "description": t.get("description", ""),
@@ -168,7 +170,9 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
                         for t in body["tools"]]
     if "stop_sequences" in body:
         out["stop"] = body["stop_sequences"]
-    if "tool_choice" in body:
+    # tool_choice without tools is invalid on most backends — only forward it
+    # alongside a non-empty tools list.
+    if "tool_choice" in body and "tools" in out:
         mapped = _map_tool_choice(body["tool_choice"])
         if mapped is not None:
             out["tool_choice"] = mapped
@@ -308,6 +312,16 @@ def openai_to_anthropic_response(data: dict, model: str) -> dict:
                         "id": tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}",
                         "name": fn.get("name"), "input": args})
 
+    # Reasoning models (NIM-style) put chain-of-thought in reasoning_content; when the
+    # budget runs out mid-reasoning the answer content comes back empty. Surface the
+    # reasoning instead of returning an empty turn the client can't act on.
+    if not content:
+        reasoning = msg.get("reasoning_content") or msg.get("reasoning")
+        if reasoning:
+            log.warning("model=%s returned reasoning but no content "
+                        "(max_tokens too low?); surfacing reasoning as text", model)
+            content.append({"type": "text", "text": reasoning})
+
     usage = data.get("usage", {}) or {}
     return {
         "id": data.get("id") or f"msg_{uuid.uuid4().hex}",
@@ -335,6 +349,7 @@ async def stream_anthropic_events(lines: AsyncIterator[str], model: str) -> Asyn
 
     text_open = False
     full_text: list[str] = []
+    reasoning_parts: list[str] = []
     api_tools: dict[int, dict] = {}
     finish_reason = None
     out_tokens = 0
@@ -353,6 +368,12 @@ async def stream_anthropic_events(lines: AsyncIterator[str], model: str) -> Asyn
             out_tokens = chunk["usage"].get("completion_tokens", out_tokens)
         choice = (chunk.get("choices") or [{}])[0]
         delta = choice.get("delta", {}) or {}
+
+        # NIM-style reasoning models stream chain-of-thought separately; keep it so a
+        # reasoning-only response (budget exhausted mid-thought) isn't an empty turn.
+        r = delta.get("reasoning_content") or delta.get("reasoning")
+        if r:
+            reasoning_parts.append(r)
 
         if delta.get("content"):
             if not text_open:
@@ -416,6 +437,14 @@ async def stream_anthropic_events(lines: AsyncIterator[str], model: str) -> Asyn
             if b["type"] == "tool_use":
                 for ev in _emit_tool(b["id"], b["name"], None, b["input"]):
                     yield ev
+    elif reasoning_parts:
+        # Reasoning-only stream: the model spent the whole budget thinking. Surface the
+        # reasoning as text rather than ending the turn with no content at all.
+        log.warning("model=%s streamed reasoning but no content "
+                    "(max_tokens too low?); surfacing reasoning as text", model)
+        yield _sse("content_block_start", {"type": "content_block_start", "index": 0,
+                   "content_block": {"type": "text", "text": "".join(reasoning_parts)}})
+        yield _sse("content_block_stop", {"type": "content_block_stop", "index": 0})
 
     yield _sse("message_delta", {"type": "message_delta",
                "delta": {"stop_reason": map_stop_reason(finish_reason or "stop"),

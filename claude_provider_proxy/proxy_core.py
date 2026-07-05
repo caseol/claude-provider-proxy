@@ -10,15 +10,40 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import time
 from typing import AsyncIterator
 
 import httpx
 
 from . import translate_openai as tx
-from .providers import RETRYABLE_STATUS, ProviderConfig
+from .providers import CONFIG_DIR, RETRYABLE_STATUS, ProviderConfig
 
 CHAT_TIMEOUT = httpx.Timeout(300.0, connect=15.0)
+ERROR_DUMP_DIR = CONFIG_DIR / "error-dumps"
 log = logging.getLogger("claude_provider_proxy")
+
+
+def _log_fatal(provider: ProviderConfig, model: str, status: int, body_text: str,
+               request_body: dict) -> None:
+    """Log a non-retryable upstream error WITH its body, and dump the exact request
+    that triggered it for post-mortem. One dump file per provider+status (overwritten),
+    so disk use stays bounded."""
+    snippet = (body_text or "")[:300].replace("\n", " ")
+    log.warning("%s: %s -> %s non-retryable: %s", provider.name, model, status, snippet)
+    try:
+        ERROR_DUMP_DIR.mkdir(parents=True, exist_ok=True)
+        fname = f"{provider.name}-{status}.json"
+        (ERROR_DUMP_DIR / fname).write_text(json.dumps({
+            "when": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "provider": provider.name,
+            "model": model,
+            "status": status,
+            "error_body": (body_text or "")[:4000],
+            "request": request_body,
+        }, ensure_ascii=False, indent=2))
+        log.warning("request dumped to %s", ERROR_DUMP_DIR / fname)
+    except Exception as e:  # noqa: BLE001 — diagnostics must never break serving
+        log.warning("error-dump failed: %s", e)
 
 
 def strip_cache_control(obj):
@@ -86,8 +111,7 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                         log.warning("%s: %s -> %s (pre-stream), falling back",
                                     provider.name, model, resp.status_code)
                         last_err = _err(resp.status_code, txt[:300]); continue
-                    log.warning("%s: %s -> %s (pre-stream), non-retryable",
-                                provider.name, model, resp.status_code)
+                    _log_fatal(provider, model, resp.status_code, txt, oai)
                     return resp.status_code, _err(resp.status_code, txt[:300])
 
                 async def gen():
@@ -109,6 +133,7 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                         log.warning("%s: %s -> %s, falling back",
                                     provider.name, model, resp.status_code)
                         last_err = _err(resp.status_code, resp.text[:300]); continue
+                    _log_fatal(provider, model, resp.status_code, resp.text, oai)
                     return resp.status_code, _err(resp.status_code, resp.text[:300])
                 return 200, tx.openai_to_anthropic_response(resp.json(), model)
         except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException) as e:
@@ -150,8 +175,7 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
                         log.warning("%s: %s -> %s (pre-stream), falling back",
                                     provider.name, model, resp.status_code)
                         last_err = _err(resp.status_code, txt[:300]); continue
-                    log.warning("%s: %s -> %s (pre-stream), non-retryable",
-                                provider.name, model, resp.status_code)
+                    _log_fatal(provider, model, resp.status_code, txt, out)
                     return resp.status_code, _err(resp.status_code, txt[:300])
 
                 async def gen():
@@ -174,6 +198,8 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
                                 provider.name, model, resp.status_code)
                     last_err = _err(resp.status_code, resp.text[:300]); continue
                 # pass the upstream Anthropic response (success or hard error) through
+                if resp.status_code != 200:
+                    _log_fatal(provider, model, resp.status_code, resp.text, out)
                 try:
                     return resp.status_code, resp.json()
                 except Exception:  # noqa: BLE001

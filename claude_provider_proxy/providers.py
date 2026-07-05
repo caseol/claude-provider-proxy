@@ -107,7 +107,11 @@ BUILTIN: dict[str, dict] = {
         "base_url": "https://integrate.api.nvidia.com/v1",
         "api_key_env": "NVIDIA_API_KEY",
         "auth": "bearer",
-        "reasoning_models": ["deepseek-ai/deepseek-v4-flash", "deepseek-ai/deepseek-v4-pro"],
+        # step-3.7-flash reasons before answering (reasoning_content); without the
+        # token floor it burns small max_tokens budgets entirely on reasoning and
+        # returns empty content.
+        "reasoning_models": ["deepseek-ai/deepseek-v4-flash", "deepseek-ai/deepseek-v4-pro",
+                             "stepfun-ai/step-3.7-flash"],
         "default_model": "deepseek-ai/deepseek-v4-flash",
         # Verified live (2026-07-05): NIM accepts native tool history (503s seen
         # during probing were the usual ResourceExhausted capacity flakiness).
