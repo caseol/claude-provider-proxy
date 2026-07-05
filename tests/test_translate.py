@@ -56,7 +56,8 @@ def test_reasoning_token_floor():
     body = {"model": "deepseek-v4-flash", "max_tokens": 10,
             "messages": [{"role": "user", "content": "x"}]}
     o = tx.anthropic_to_openai(body, ZEN)
-    assert o["max_tokens"] == 1024   # bumped for reasoning model
+    # bumped to the provider's floor (zen: 4096 — free deepseek always reasons)
+    assert o["max_tokens"] == ZEN.min_tokens_reasoning == 4096
 
 
 def test_tools_and_stop_translation():

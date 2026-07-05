@@ -100,6 +100,11 @@ BUILTIN: dict[str, dict] = {
         "auth": "bearer",
         "user_agent": _BROWSER_UA,
         "reasoning_models": ["deepseek-v4-flash-free", "deepseek-v4-pro", "deepseek-v4-flash"],
+        # deepseek-v4-flash-free always reasons (no disable knob accepted; verified
+        # 2026-07-05) and its chain-of-thought grows with context size — with the
+        # default 1024 floor, heavy agentic turns exhaust the budget mid-thought and
+        # return empty content. Tokens are free on Zen; give reasoning real room.
+        "min_tokens_reasoning": 4096,
         "default_model": "deepseek-v4-flash-free",
     },
     "nvidia": {

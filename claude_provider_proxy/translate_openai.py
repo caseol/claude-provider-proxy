@@ -318,8 +318,12 @@ def openai_to_anthropic_response(data: dict, model: str) -> dict:
     if not content:
         reasoning = msg.get("reasoning_content") or msg.get("reasoning")
         if reasoning:
+            u = data.get("usage", {}) or {}
             log.warning("model=%s returned reasoning but no content "
-                        "(max_tokens too low?); surfacing reasoning as text", model)
+                        "(finish=%s, completion_tokens=%s, reasoning_chars=%d); "
+                        "surfacing reasoning as text",
+                        model, choice.get("finish_reason"),
+                        u.get("completion_tokens"), len(reasoning))
             content.append({"type": "text", "text": reasoning})
 
     usage = data.get("usage", {}) or {}
@@ -450,7 +454,10 @@ async def stream_anthropic_events(lines: AsyncIterator[str], model: str) -> Asyn
         # Reasoning-only stream: the model spent the whole budget thinking. Surface the
         # reasoning as text rather than ending the turn with no content at all.
         log.warning("model=%s streamed reasoning but no content "
-                    "(max_tokens too low?); surfacing reasoning as text", model)
+                    "(finish=%s, output_tokens=%s, reasoning_chars=%d); "
+                    "surfacing reasoning as text",
+                    model, finish_reason, out_tokens,
+                    sum(len(p) for p in reasoning_parts))
         yield _sse("content_block_start", {"type": "content_block_start", "index": 0,
                    "content_block": {"type": "text", "text": "".join(reasoning_parts)}})
         yield _sse("content_block_stop", {"type": "content_block_stop", "index": 0})
