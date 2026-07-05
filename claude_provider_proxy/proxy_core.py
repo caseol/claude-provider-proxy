@@ -114,9 +114,49 @@ async def handle_openai(provider: ProviderConfig, body: dict):
                     _log_fatal(provider, model, resp.status_code, txt, oai)
                     return resp.status_code, _err(resp.status_code, txt[:300])
 
-                async def gen():
+                # Some upstreams (NVIDIA NIM) return HTTP 200 and deliver the failure
+                # INSIDE the stream as the first data chunk ({"error": {...}}), e.g.
+                # "ResourceExhausted: Worker local total request limit reached". Peek
+                # the first chunk so those still classify for fallback instead of
+                # translating into an empty assistant turn.
+                line_iter = resp.aiter_lines()
+                buffered: list[str] = []
+                stream_err = None
+                async for line in line_iter:
+                    buffered.append(line)
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:].strip()
+                    if payload == "[DONE]":
+                        break
                     try:
-                        async for ev in tx.stream_anthropic_events(resp.aiter_lines(), model):
+                        first = json.loads(payload)
+                    except json.JSONDecodeError:
+                        break
+                    if isinstance(first.get("error"), dict):
+                        stream_err = first["error"]
+                    break
+                if stream_err is not None:
+                    code = stream_err.get("code")
+                    status = code if isinstance(code, int) and 400 <= code < 600 else 502
+                    txt = json.dumps(stream_err)
+                    await resp.aclose(); await client.aclose()
+                    if status in RETRYABLE_STATUS or provider.matches_transient_pattern(txt):
+                        log.warning("%s: %s -> %s (error-in-stream), falling back",
+                                    provider.name, model, status)
+                        last_err = _err(status, txt[:300]); continue
+                    _log_fatal(provider, model, status, txt, oai)
+                    return status, _err(status, txt[:300])
+
+                async def _replay(buf=buffered, rest=line_iter):
+                    for bl in buf:
+                        yield bl
+                    async for rl in rest:
+                        yield rl
+
+                async def gen(lines=_replay()):
+                    try:
+                        async for ev in tx.stream_anthropic_events(lines, model):
                             yield ev
                     except (httpx.RemoteProtocolError, httpx.StreamError, httpx.HTTPError) as e:
                         log.warning("%s: %s stalled mid-stream: %s", provider.name, model, e)

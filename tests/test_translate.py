@@ -790,3 +790,83 @@ def test_reasoning_ignored_when_content_present():
                          "finish_reason": "stop"}], "usage": {}}
     r = tx.openai_to_anthropic_response(data, "m")
     assert r["content"] == [{"type": "text", "text": "answer"}]
+
+
+# ---- error-in-stream (HTTP 200 with an error data chunk, NIM style) ----
+
+def test_handle_openai_error_in_first_stream_chunk_falls_back(monkeypatch):
+    """NIM returns HTTP 200 and puts capacity failures INSIDE the stream
+    ('ResourceExhausted', code 500). That must classify for fallback like a real
+    5xx, not translate into an empty assistant turn."""
+    import asyncio
+
+    provider = ProviderConfig(name="nv", flavor="openai", base_url="http://u",
+                              api_key_env="K", default_fallback=["m2"])
+    calls = []
+
+    def _resp_for(model):
+        class FakeResp:
+            status_code = 200
+
+            async def aiter_lines(self):
+                if model == "m1":
+                    yield "data: " + json.dumps({"error": {
+                        "message": "ResourceExhausted: Worker local total request limit reached",
+                        "code": 500}})
+                    yield "data: [DONE]"
+                else:
+                    yield "data: " + json.dumps({"choices": [{"delta": {"content": "oi"}}]})
+                    yield "data: " + json.dumps({"choices": [{"delta": {},
+                                                              "finish_reason": "stop"}]})
+                    yield "data: [DONE]"
+
+            async def aclose(self):
+                pass
+        return FakeResp()
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def build_request(self, method, url, headers=None, json=None):
+            calls.append(json["model"])
+            return json["model"]
+
+        async def send(self, req, stream=False):
+            return _resp_for(req)
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(proxy_core.httpx, "AsyncClient", FakeClient)
+
+    async def run():
+        status, gen = await proxy_core.handle_openai(
+            provider, {"model": "m1", "stream": True,
+                       "messages": [{"role": "user", "content": "hi"}]})
+        assert status == "stream"
+        return [e async for e in gen]
+
+    events = asyncio.run(run())
+    joined = "".join(events)
+    assert calls == ["m1", "m2"]           # fell back to the next model
+    assert "text_delta" in joined and "oi" in joined
+    assert "event: error" not in joined    # the fallback absorbed the failure
+
+
+def test_stream_mid_stream_error_chunk_yields_error_frame():
+    """An error chunk AFTER content already flowed can't fall back (bytes were sent);
+    it must surface as a clean `event: error` frame, not a silent empty ending."""
+    import asyncio
+
+    async def lines():
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": "partial"}}]})
+        yield "data: " + json.dumps({"error": {"message": "boom", "code": 500}})
+        yield "data: [DONE]"
+
+    async def run():
+        return [e async for e in tx.stream_anthropic_events(lines(), "m")]
+
+    joined = "".join(asyncio.run(run()))
+    assert "partial" in joined
+    assert "event: error" in joined and "boom" in joined

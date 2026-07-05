@@ -364,6 +364,15 @@ async def stream_anthropic_events(lines: AsyncIterator[str], model: str) -> Asyn
             chunk = json.loads(payload)
         except json.JSONDecodeError:
             continue
+        # An in-stream error after content already flowed (NIM style: HTTP 200, error
+        # as a data chunk). Surface it as an error frame instead of ending the turn
+        # silently — the first-chunk case is intercepted earlier for fallback.
+        if isinstance(chunk.get("error"), dict):
+            emsg = json.dumps(chunk["error"], ensure_ascii=False)
+            log.warning("model=%s upstream error mid-stream: %.200s", model, emsg)
+            yield _sse("error", {"type": "error",
+                                 "error": {"type": "api_error", "message": emsg[:300]}})
+            return
         if chunk.get("usage"):
             out_tokens = chunk["usage"].get("completion_tokens", out_tokens)
         choice = (chunk.get("choices") or [{}])[0]
