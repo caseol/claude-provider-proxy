@@ -207,7 +207,7 @@ def _map_tool_choice(tc):
 TOOL_MARKER_PREFIX = "[tool_use: "
 
 
-def find_tool_use_blocks(text: str) -> list[dict]:
+def find_tool_use_blocks(text: str, model: str | None = None) -> list[dict]:
     blocks, i = [], 0
     while True:
         start = text.find(TOOL_MARKER_PREFIX, i)
@@ -257,24 +257,39 @@ def find_tool_use_blocks(text: str) -> list[dict]:
         raw = text[k:p + 1]
         try:
             inp = json.loads(raw)
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            # Header parsed fine but the brace-matched input body itself isn't valid
+            # JSON (e.g. a duplicated/garbled key). Silently defaulting to {} would
+            # dispatch the tool with no arguments and leave zero trace server-side.
+            log.warning("model=%s marker %r has malformed JSON input (%s); "
+                        "using empty input: %.200r", model, name, e, raw)
             inp = {}
         blocks.append({"start": start, "end": p + 1, "name": name, "id": tid, "input": inp})
         i = p + 1
     return blocks
 
 
-def split_text_and_tools(text: str):
-    found = find_tool_use_blocks(text)
+def split_text_and_tools(text: str, model: str | None = None):
+    found = find_tool_use_blocks(text, model=model)
     if not found:
         return None
     out, cursor = [], 0
+    seen_ids: set[str] = set()
     for b in found:
         pre = text[cursor:b["start"]].strip()
         if pre:
             out.append({"type": "text", "text": pre})
-        out.append({"type": "tool_use", "id": b["id"] or f"toolu_{uuid.uuid4().hex[:24]}",
-                    "name": b["name"], "input": b["input"]})
+        tid = b["id"] or ""
+        if not tid or tid in seen_ids:
+            # A weak model can hallucinate/repeat the same id across distinct markers
+            # (or emit none at all); reusing it would corrupt the client's tool_use ->
+            # tool_result correlation, so mint a fresh one instead of colliding.
+            if tid:
+                log.warning("model=%s marker %r reused tool_use id %r; assigning a fresh id",
+                            model, b["name"], tid)
+            tid = f"toolu_{uuid.uuid4().hex[:24]}"
+        seen_ids.add(tid)
+        out.append({"type": "tool_use", "id": tid, "name": b["name"], "input": b["input"]})
         cursor = b["end"]
     tail = text[cursor:].strip()
     if tail:
@@ -296,7 +311,7 @@ def openai_to_anthropic_response(data: dict, model: str) -> dict:
 
     text = msg.get("content")
     if text:
-        mixed = split_text_and_tools(text)
+        mixed = split_text_and_tools(text, model=model)
         if mixed is None and TOOL_MARKER_PREFIX in text:
             log.warning("model=%s emitted a %r marker that failed to parse; "
                         "falling back to raw text: %.200r", model, TOOL_MARKER_PREFIX, text)
@@ -442,7 +457,7 @@ async def stream_anthropic_events(lines: AsyncIterator[str], model: str) -> Asyn
         yield _sse("content_block_stop", {"type": "content_block_stop", "index": 0})
     elif text_open:
         joined = "".join(full_text)
-        mixed = split_text_and_tools(joined)
+        mixed = split_text_and_tools(joined, model=model)
         if mixed is None and TOOL_MARKER_PREFIX in joined:
             log.warning("model=%s emitted a %r marker that failed to parse mid-stream; "
                         "falling back to raw text: %.200r", model, TOOL_MARKER_PREFIX, joined)

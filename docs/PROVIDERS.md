@@ -33,8 +33,10 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
                   native_tool_history:true }   // verified: gateway accepts role:"tool"
 "opencode-zen": { flavor:"openai", base_url:"https://opencode.ai/zen/v1",
                   api_key_env:"ZEN_API_KEY", auth:"bearer", user_agent:"<browser UA>",
-                  reasoning_models:["deepseek-v4-flash-free","deepseek-v4-pro","deepseek-v4-flash"] }
+                  reasoning_models:["deepseek-v4-flash-free","deepseek-v4-pro","deepseek-v4-flash"],
+                  default_fallback:["deepseek-v4-flash-free"] }
                   // native_tool_history off: the Zen gateway 400s on role:"tool" (verified) — markers only
+                  // default_fallback covers Zen's other free models (nemotron-3-ultra-free, hy3-free, ...)
 "nvidia":       { flavor:"openai", base_url:"https://integrate.api.nvidia.com/v1",
                   api_key_env:"NVIDIA_API_KEY", auth:"bearer",
                   reasoning_models:["deepseek-ai/deepseek-v4-flash","deepseek-ai/deepseek-v4-pro"],
@@ -80,4 +82,6 @@ mid-stream failure is surfaced as an `event: error` SSE frame.
 Set `default_fallback` as a **universal safety net**: any requested model not listed in
 `fallbacks` (e.g. the OPUS/SONNET/HAIKU slot slugs a profile might request) falls through
 to it. Without one, a `429`/`503` on an unlisted slug ends the turn with "fallback chain
-exhausted". The `openrouter` built-in ships both a per-model chain and a `default_fallback`.
+exhausted". The `openrouter` built-in ships both a per-model chain and a `default_fallback`;
+`opencode-zen` ships a `default_fallback` only, so every free-tier model routes to the one
+proven-stable default (`deepseek-v4-flash-free`) on a retryable error.

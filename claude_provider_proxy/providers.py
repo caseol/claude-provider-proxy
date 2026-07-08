@@ -109,6 +109,14 @@ BUILTIN: dict[str, dict] = {
         # return empty content. Tokens are free on Zen; give reasoning real room.
         "min_tokens_reasoning": 4096,
         "default_model": "deepseek-v4-flash-free",
+        # Universal safety net: Zen's other free-tier models (nemotron-3-ultra-free,
+        # hy3-free, mimo-v2.5-free, north-mini-code-free, ...) had NO fallback chain at
+        # all until this was added — a single 429/5xx on any of them ended the turn
+        # outright ("model temporarily unavailable"), which is what starved the auto
+        # mode safety classifier during an unstable-model session (2026-07-07). Route
+        # any unlisted model to deepseek-v4-flash-free, the one Zen model with a
+        # verified-stable, tuned reasoning floor.
+        "default_fallback": ["deepseek-v4-flash-free"],
     },
     "nvidia": {
         "flavor": "openai",

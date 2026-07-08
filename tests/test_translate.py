@@ -395,6 +395,36 @@ def test_well_formed_marker_does_not_log_warning(caplog):
     assert not any("failed to parse" in r.message for r in caplog.records)
 
 
+def test_marker_with_malformed_json_body_logs_and_uses_empty_input(caplog):
+    """Header parses fine (name/id found) but the brace-matched input body itself is
+    not valid JSON (e.g. a duplicated key, as observed from nemotron-3-ultra-free) —
+    previously silently became {} with zero trace in the logs."""
+    import logging
+
+    text = ('[tool_use: Bash id=t1 input={"description": "description": "x"}] done')
+    with caplog.at_level(logging.WARNING, logger="claude_provider_proxy"):
+        blocks = tx.find_tool_use_blocks(text, model="nemotron-3-ultra-free")
+    assert len(blocks) == 1
+    assert blocks[0]["input"] == {}
+    assert any("malformed JSON input" in r.message for r in caplog.records)
+
+
+def test_duplicate_marker_ids_get_deduped(caplog):
+    """Two distinct markers sharing the same id (observed as hallucinated repetition
+    from weak models) must not produce two tool_use blocks with the same id — that
+    would corrupt the client's tool_use -> tool_result correlation."""
+    import logging
+
+    text = ('[tool_use: Bash id=t1 input={"command": "a"}] then '
+            '[tool_use: Bash id=t1 input={"command": "b"}] end')
+    with caplog.at_level(logging.WARNING, logger="claude_provider_proxy"):
+        blocks = tx.split_text_and_tools(text, model="kimi-k2.7-code")
+    tool_blocks = [b for b in blocks if b["type"] == "tool_use"]
+    assert len(tool_blocks) == 2
+    assert tool_blocks[0]["id"] != tool_blocks[1]["id"]
+    assert any("reused tool_use id" in r.message for r in caplog.records)
+
+
 def test_map_stop_reason():
     assert tx.map_stop_reason("length") == "max_tokens"
     assert tx.map_stop_reason("stop") == "end_turn"
@@ -408,6 +438,15 @@ def test_chain_for():
                        fallbacks={"a": ["b", "c"]}, default_fallback=["z"])
     assert p.chain_for("a") == ["a", "b", "c"]
     assert p.chain_for("q") == ["q", "z"]
+
+
+def test_zen_has_a_universal_fallback():
+    """Regression: opencode-zen had no fallbacks/default_fallback at all, so any of
+    its free-tier models not explicitly listed (nemotron-3-ultra-free, hy3-free,
+    mimo-v2.5-free, north-mini-code-free, ...) had zero safety net — a single
+    retryable error ended the turn outright instead of advancing to a stable model."""
+    assert ZEN.chain_for("nemotron-3-ultra-free") == ["nemotron-3-ultra-free",
+                                                       "deepseek-v4-flash-free"]
 
 
 def test_load_providers_ignores_comment_key(tmp_path, monkeypatch):
