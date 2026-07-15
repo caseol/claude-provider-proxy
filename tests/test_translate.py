@@ -717,6 +717,55 @@ def test_handle_openai_transient_pattern_retries_chain(monkeypatch):
     assert status == 200
 
 
+def test_handle_openai_413_retries_chain(monkeypatch):
+    """Regression: Groq returns 413 "Request too large" (code rate_limit_exceeded,
+    type tokens) when a model's tokens-per-minute cap is exceeded — functionally a
+    rate limit, just mapped to 413 instead of 429. Before 413 was added to
+    RETRYABLE_STATUS, this killed the turn on the first model instead of advancing to
+    a fallback with more TPM headroom (verified live 2026-07-15, checkoutscore
+    project: gpt-oss-120b/qwen3.6-27b/gpt-oss-20b capped at 8000 TPM, llama-3.3-70b at
+    12000 TPM — Claude Code's system prompt alone routinely exceeds all of them)."""
+    import asyncio
+
+    provider = ProviderConfig(name="groq", flavor="openai", base_url="http://u",
+                              api_key_env="K", default_fallback=["m2"])
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status, text, json_body=None):
+            self.status_code = status
+            self.text = text
+            self._json = json_body
+
+        def json(self):
+            return self._json
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def post(self, url, headers=None, json=None):
+            calls.append(json["model"])
+            if json["model"] == "m1":
+                return FakeResp(413, '{"error":{"message":"Request too large ... '
+                                      'tokens per minute (TPM): Limit 8000, '
+                                      'Requested 59307","code":"rate_limit_exceeded"}}')
+            return FakeResp(200, "", {"choices": [{"message": {"content": "ok"}}], "usage": {}})
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(proxy_core.httpx, "AsyncClient", FakeClient)
+
+    async def run():
+        return await proxy_core.handle_openai(
+            provider, {"model": "m1", "messages": [{"role": "user", "content": "hi"}]})
+
+    status, result = asyncio.run(run())
+    assert calls == ["m1", "m2"]
+    assert status == 200
+
+
 def test_handle_openai_non_matching_400_is_fatal_preserves_message(monkeypatch):
     """A 400 that doesn't match any configured pattern is fatal and immediate — no
     wasted round-trips through the fallback chain, and the real error isn't buried."""

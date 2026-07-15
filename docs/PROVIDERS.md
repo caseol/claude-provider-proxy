@@ -95,11 +95,17 @@ Then `MY_LLM_KEY=...` in `.env`, and `claude-proxy my-llm`. The proxy serves it 
 
 ## Fallback chains
 
-On a connection error or a retryable status (`429, 500, 502, 503, 504`), the proxy tries
-the next model in `chain_for(model) = [model, *fallbacks]`. A `400` is also retried if the
-provider's `transient_error_patterns` matches the response body — otherwise a `400` (e.g.
-"model not supported") is returned as-is. Fallback is for overload/quota/known-transient
+On a connection error or a retryable status (`413, 429, 500, 502, 503, 504`), the proxy
+tries the next model in `chain_for(model) = [model, *fallbacks]`. A `400` is also retried
+if the provider's `transient_error_patterns` matches the response body — otherwise a `400`
+(e.g. "model not supported") is returned as-is. Fallback is for overload/quota/known-transient
 upstream quirks, not genuine bad requests.
+
+`413` is included because Groq maps its per-model tokens-per-minute cap to `413 Request
+too large` (`code: "rate_limit_exceeded"`, `type: "tokens"`) instead of `429` — a
+functional rate limit, not a genuinely oversized payload. Without it in the retryable set,
+a low-TPM model (Groq free/on-demand tiers cap most models at 6,000–12,000 TPM) would kill
+the turn on the first attempt instead of advancing toward a model with more headroom.
 
 For streaming, fallback only applies **before** the stream starts; once bytes flow, a
 mid-stream failure is surfaced as an `event: error` SSE frame.

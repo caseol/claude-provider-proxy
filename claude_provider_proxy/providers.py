@@ -19,7 +19,12 @@ PROVIDERS_FILE = CONFIG_DIR / "providers.json"
 _BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like "
                "Gecko) Chrome/138.0.0.0 Safari/537.36")
 
-RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+# 413 included alongside the classic overload/quota set: Groq returns 413 "Request
+# too large" (code "rate_limit_exceeded", type "tokens") for its per-model
+# tokens-per-minute cap — functionally a rate limit, just mapped to 413 instead of
+# 429. Without it, a 413 on a low-TPM model killed the turn instead of advancing the
+# fallback chain toward a model with more TPM headroom (verified live 2026-07-15).
+RETRYABLE_STATUS = {413, 429, 500, 502, 503, 504}
 MIN_TOKENS_REASONING = 1024
 
 
