@@ -180,6 +180,10 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
         out["top_p"] = body["top_p"]
     # Intentionally not forwarded: top_k, metadata, parallel_tool_calls — no clean
     # OpenAI Chat Completions equivalent.
+    # Unconditional per-model fields (e.g. disabling a model's default reasoning
+    # leak) apply regardless of whether the client requested extended thinking.
+    if model in provider.model_extra_body:
+        out.update(copy.deepcopy(provider.model_extra_body[model]))
     thinking = body.get("thinking")
     if (provider.reasoning_extra_body and isinstance(thinking, dict)
             and thinking.get("type") == "enabled" and model in provider.reasoning_models):

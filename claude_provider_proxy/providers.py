@@ -49,6 +49,11 @@ class ProviderConfig:
     # reasoning_models — each backend names its reasoning knob differently, e.g.
     # NVIDIA NIM DeepSeek: {"chat_template_kwargs": {"thinking": true}}.
     reasoning_extra_body: dict = field(default_factory=dict)
+    # Campos extras injetados incondicionalmente (independente de thinking) para
+    # modelos específicos — ex. Groq qwen/qwen3.6-27b vaza tags <think> cruas no
+    # content por padrão; {"reasoning_effort": "none"} desliga isso sempre, não só
+    # quando o cliente pede extended thinking.
+    model_extra_body: dict[str, dict] = field(default_factory=dict)
     # Headers HTTP extras enviados em todo request a este provider (ex. atribuição
     # do OpenRouter: HTTP-Referer / X-Title). Mesclados por cima dos headers base.
     extra_headers: dict = field(default_factory=dict)
@@ -160,6 +165,48 @@ BUILTIN: dict[str, dict] = {
         "default_fallback": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"],
         # native_tool_history desligado até verificar ao vivo o aceite de role:"tool".
     },
+    "groq": {
+        # Groq (LPU inference, https://api.groq.com/openai/v1) — OpenAI-compatível nativo.
+        "flavor": "openai",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "auth": "bearer",
+        # moonshotai/kimi-k2-instruct-0905 é documentado pela Groq mas retornou 404
+        # "model_not_found" ao vivo (2026-07-15) — não disponível nesta conta apesar
+        # de listado na doc pública. openai/gpt-oss-120b é o maior modelo confirmado
+        # ao vivo (via /v1/models + chamada real) e vira o flagship.
+        # qwen/qwen3-32b e qwen/qwen3.6-27b também disponíveis, mas vazam tags
+        # <think>...</think> cruas dentro do content por padrão (reasoning_format
+        # "raw" é o default deles) — poluiria a resposta do Claude Code sem um
+        # reasoning_extra_body dedicado; ficam de fora do mapeamento por ora.
+        # Só os modelos gpt-oss expõem reasoning limpo (campo message.reasoning
+        # dedicado, nunca inline) na Groq; kimi-k2 e llama não têm o knob.
+        "reasoning_models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+        # Knob de reasoning da Groq é plano (reasoning_effort), diferente do aninhado
+        # do OpenRouter. include_reasoning:true cai no campo message.reasoning que
+        # translate_openai.py já resgata (reasoning_content|reasoning).
+        "reasoning_extra_body": {"reasoning_effort": "high", "include_reasoning": True},
+        "default_model": "openai/gpt-oss-120b",
+        "fallbacks": {
+            "openai/gpt-oss-120b": ["llama-3.3-70b-versatile", "openai/gpt-oss-20b",
+                                     "llama-3.1-8b-instant"],
+            "llama-3.3-70b-versatile": ["openai/gpt-oss-120b", "llama-3.1-8b-instant"],
+            "openai/gpt-oss-20b": ["llama-3.1-8b-instant"],
+        },
+        # Rede de segurança universal para qualquer slug fora do dict acima.
+        "default_fallback": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        # Verificado ao vivo (2026-07-15): a Groq aceita assistant.tool_calls +
+        # role:"tool" (tool_call_id) nativamente e responde de forma coerente.
+        "native_tool_history": True,
+        # qwen/qwen3.6-27b (usado no slot Fable) vaza tags <think>...</think> cruas
+        # dentro do content por padrão (reasoning ligado sem pedido, formato "raw").
+        # reasoning_effort:"none" desliga o reasoning por completo — verificado ao
+        # vivo (2026-07-15): content limpo, tool calling normal, sem custo extra de
+        # tokens de raciocínio. Aplicado incondicionalmente (não gated por thinking,
+        # diferente de reasoning_extra_body) porque o vazamento acontece em toda
+        # chamada, não só quando o cliente pede extended thinking.
+        "model_extra_body": {"qwen/qwen3.6-27b": {"reasoning_effort": "none"}},
+    },
 }
 
 
@@ -177,6 +224,7 @@ def _make(name: str, d: dict) -> ProviderConfig:
         transient_error_patterns=list(d.get("transient_error_patterns", [])),
         native_tool_history=bool(d.get("native_tool_history", False)),
         reasoning_extra_body=dict(d.get("reasoning_extra_body", {})),
+        model_extra_body={k: dict(v) for k, v in d.get("model_extra_body", {}).items()},
         extra_headers=dict(d.get("extra_headers", {})),
         fallbacks={k: list(v) for k, v in d.get("fallbacks", {}).items()},
         default_fallback=list(d.get("default_fallback", [])),

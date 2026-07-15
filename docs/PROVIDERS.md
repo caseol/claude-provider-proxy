@@ -1,7 +1,7 @@
 # Providers
 
 A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
-`opencode-zen`, `nvidia`, `openrouter`. Add/override in `~/.config/claude-provider-proxy/providers.json`
+`opencode-zen`, `nvidia`, `openrouter`, `groq`. Add/override in `~/.config/claude-provider-proxy/providers.json`
 (deep-merged over the built-ins). Keys come from `~/.config/claude-provider-proxy/.env`.
 
 ## ProviderConfig fields
@@ -18,6 +18,7 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
 | `transient_error_patterns` | List of response-body substrings that make an otherwise-fatal status (typically `400`) retryable for **this provider only** — e.g. `["Upstream request failed"]` for `opencode-go` |
 | `native_tool_history` | Replay tool history natively as `assistant.tool_calls` + `role:"tool"` messages instead of text markers. Enable only for backends verified to accept `role:"tool"`; markers stay the safe default |
 | `reasoning_extra_body` | Extra top-level request fields injected when the client requests extended thinking and the model is in `reasoning_models` — e.g. `{"chat_template_kwargs": {"thinking": true}}` for NVIDIA NIM DeepSeek, `{"reasoning": {"enabled": true}}` for OpenRouter |
+| `model_extra_body` | `{model: {field: value}}` — extra fields injected into **every** request for that specific model, unconditionally (unlike `reasoning_extra_body`, not gated on the client requesting extended thinking). For a model whose default behavior needs suppressing regardless of client intent — e.g. Groq `qwen/qwen3.6-27b` leaks raw `<think>` tags into `content` unless `reasoning_effort:"none"` is always sent |
 | `extra_headers` | Extra HTTP headers sent on every request to this provider, merged over the base headers — e.g. OpenRouter attribution `{"HTTP-Referer": "...", "X-Title": "..."}` |
 | `fallbacks` | `{model: [chain…]}` — models to try after the requested one on overload/quota/5xx |
 | `default_fallback` | Chain used when a requested model isn't in `fallbacks` |
@@ -51,6 +52,30 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
                              "deepseek/deepseek-v4-pro":["deepseek/deepseek-v4-flash"]},
                   default_fallback:["deepseek/deepseek-v4-flash","deepseek/deepseek-v4-pro"] }
                   // native_tool_history off until role:"tool" acceptance is verified live
+"groq":         { flavor:"openai", base_url:"https://api.groq.com/openai/v1",
+                  api_key_env:"GROQ_API_KEY", auth:"bearer",
+                  reasoning_models:["openai/gpt-oss-120b","openai/gpt-oss-20b"],
+                  reasoning_extra_body:{"reasoning_effort":"high","include_reasoning":true},
+                  model_extra_body:{"qwen/qwen3.6-27b":{"reasoning_effort":"none"}},
+                  default_model:"openai/gpt-oss-120b",
+                  native_tool_history:true,
+                  fallbacks:{"openai/gpt-oss-120b":["llama-3.3-70b-versatile","openai/gpt-oss-20b","llama-3.1-8b-instant"],
+                             "llama-3.3-70b-versatile":["openai/gpt-oss-120b","llama-3.1-8b-instant"],
+                             "openai/gpt-oss-20b":["llama-3.1-8b-instant"]},
+                  default_fallback:["llama-3.3-70b-versatile","llama-3.1-8b-instant"] }
+                  // Groq's reasoning knob is flat (reasoning_effort/include_reasoning), unlike
+                  // OpenRouter's nested {"reasoning":{"enabled":true}} — only gpt-oss models
+                  // support it cleanly (reasoning in a dedicated field, never inline).
+                  // moonshotai/kimi-k2-instruct-0905 is documented by Groq but returned
+                  // "model_not_found" live (2026-07-15) on this account — not used.
+                  // qwen/qwen3.6-27b (used for the Fable slot) leaks raw <think> tags into
+                  // content by default (reasoning always on, format "raw") — model_extra_body
+                  // forces reasoning_effort:"none" for it on every request, verified live
+                  // (2026-07-15): clean content, normal tool calling, no extra token cost.
+                  // qwen/qwen3-32b has the same leak and isn't mapped to any slot (would need
+                  // the same treatment before use).
+                  // native_tool_history:true — verified live (2026-07-15): Groq accepts
+                  // assistant.tool_calls + role:"tool" natively.
 ```
 
 ## Adding a provider

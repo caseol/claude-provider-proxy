@@ -63,6 +63,26 @@ cp examples/profiles/openrouter/deepseek.env.example \
 claude-proxy profile openrouter use deepseek
 ```
 
+A single ready-made profile for `groq` (copy into
+`~/.config/claude-provider-proxy/profiles/groq/<name>.env`, dropping the `.example`
+suffix):
+
+| File | Fable | Opus | Workhorse (Sonnet/Subagent) | Fast (Haiku) |
+|---|---|---|---|---|
+| [`default.env.example`](../examples/profiles/groq/default.env.example) | `qwen/qwen3.6-27b` | `openai/gpt-oss-120b` | `llama-3.3-70b-versatile` | `openai/gpt-oss-20b` |
+
+`qwen/qwen3.6-27b` leaks raw `<think>` tags into its output by default (reasoning
+always on, `reasoning_format:"raw"`) — the `groq` provider's `model_extra_body` injects
+`{"reasoning_effort": "none"}` unconditionally for this model so Fable gets clean text
+(see [PROVIDERS.md](PROVIDERS.md)).
+
+```bash
+mkdir -p ~/.config/claude-provider-proxy/profiles/groq
+cp examples/profiles/groq/default.env.example \
+   ~/.config/claude-provider-proxy/profiles/groq/default.env
+claude-proxy profile groq use default
+```
+
 ## Fallbacks
 
 Per-slot fallback now lives in the provider's `fallbacks` (see [PROVIDERS.md](PROVIDERS.md)),

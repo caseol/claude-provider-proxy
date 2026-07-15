@@ -4,7 +4,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-**One local proxy that runs [Claude Code](https://claude.com/claude-code) against any model backend — OpenCode Go, OpenCode Zen, NVIDIA NIM, OpenRouter, or your own OpenAI/Anthropic-compatible endpoint — with per-provider profiles. Pick the provider; keep the Claude Code experience.**
+**One local proxy that runs [Claude Code](https://claude.com/claude-code) against any model backend — OpenCode Go, OpenCode Zen, NVIDIA NIM, OpenRouter, Groq, or your own OpenAI/Anthropic-compatible endpoint — with per-provider profiles. Pick the provider; keep the Claude Code experience.**
 
 Claude Code speaks the Anthropic Messages API. This proxy exposes that API locally, routes each request to the **provider you choose** (by URL path), translates Anthropic↔OpenAI when needed, and streams the response back. A single daemon serves all providers at once.
 
@@ -16,9 +16,9 @@ Running Claude Code on third-party/cheaper/free model backends meant a separate 
 
 ## Features
 
-- **Multi-provider, one daemon** — provider chosen by URL path (`/opencode-zen`, `/opencode-go`, `/nvidia`, `/openrouter`, …). Run several at once.
+- **Multi-provider, one daemon** — provider chosen by URL path (`/opencode-zen`, `/opencode-go`, `/nvidia`, `/openrouter`, `/groq`, …). Run several at once.
 - **Two translation flavors**:
-  - `openai` — full Anthropic↔OpenAI Chat Completions translation (system prompts, content blocks, tools, streaming SSE, tool-call round-tripping). Used by **OpenCode Go, OpenCode Zen, NVIDIA, OpenRouter**, and any OpenAI-compatible endpoint.
+  - `openai` — full Anthropic↔OpenAI Chat Completions translation (system prompts, content blocks, tools, streaming SSE, tool-call round-tripping). Used by **OpenCode Go, OpenCode Zen, NVIDIA, OpenRouter, Groq**, and any OpenAI-compatible endpoint.
   - `anthropic` — passthrough to a genuinely Anthropic-native endpoint, with per-model `cache_control` stripping. (OpenCode Go is served via the `openai` flavor — its native Anthropic endpoint mistranslates tools.)
 - **Per-provider profiles** — `FABLE/OPUS/SONNET/HAIKU/SUBAGENT` model slots, `active_profile`, `--profile`, and `profile list|use|show|new` — same workflow as before.
 - **Ordered fallback chains** — per-model fallback on overload/quota/5xx (generalizes the old single-subagent fallback).
@@ -66,6 +66,7 @@ environment variables win over the file). Each built-in provider reads a specifi
 | `opencode-zen` | `ZEN_API_KEY` | `deepseek-v4-flash-free` | [opencode.ai](https://opencode.ai) Zen dashboard |
 | `nvidia` | `NVIDIA_API_KEY` | `deepseek-ai/deepseek-v4-flash` | [build.nvidia.com](https://build.nvidia.com) (NIM) |
 | `openrouter` | `OPENROUTER_API_KEY` | `deepseek/deepseek-v4-flash` | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `groq` | `GROQ_API_KEY` | `openai/gpt-oss-120b` | [console.groq.com/keys](https://console.groq.com/keys) |
 
 ```
 # ~/.config/claude-provider-proxy/.env
@@ -73,6 +74,7 @@ OC_GO_CC_API_KEY=sk-opencode-...
 ZEN_API_KEY=sk-...
 NVIDIA_API_KEY=nvapi-...
 OPENROUTER_API_KEY=sk-or-...
+GROQ_API_KEY=gsk_...
 ```
 
 A provider added in `providers.json` names its own `api_key_env`; add that variable to the
@@ -165,7 +167,7 @@ See [`examples/curl_examples.sh`](examples/curl_examples.sh).
 
 ## Configuration
 
-- **Providers** — built-in: `opencode-go`, `opencode-zen`, `nvidia`, `openrouter`. Override or add your own in `~/.config/claude-provider-proxy/providers.json` (see [`config/providers.example.json`](config/providers.example.json) and [docs/PROVIDERS.md](docs/PROVIDERS.md)).
+- **Providers** — built-in: `opencode-go`, `opencode-zen`, `nvidia`, `openrouter`, `groq`. Override or add your own in `~/.config/claude-provider-proxy/providers.json` (see [`config/providers.example.json`](config/providers.example.json) and [docs/PROVIDERS.md](docs/PROVIDERS.md)).
 - **Profiles** — `~/.config/claude-provider-proxy/profiles/<provider>/<name>.env` with the five model slots. [docs/PROFILES.md](docs/PROFILES.md).
 - **Keys** — `~/.config/claude-provider-proxy/.env`.
 - **Port** — `CLAUDE_PROVIDER_PROXY_PORT` (default 3460).

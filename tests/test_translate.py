@@ -12,6 +12,7 @@ from claude_provider_proxy import proxy_core                      # noqa: E402
 from claude_provider_proxy.providers import load_providers, ProviderConfig  # noqa: E402
 
 ZEN = load_providers()["opencode-zen"]
+GROQ = load_providers()["groq"]
 NATIVE = ProviderConfig(name="nt", flavor="openai", base_url="http://u", api_key_env="K",
                         native_tool_history=True)
 
@@ -447,6 +448,65 @@ def test_zen_has_a_universal_fallback():
     retryable error ended the turn outright instead of advancing to a stable model."""
     assert ZEN.chain_for("nemotron-3-ultra-free") == ["nemotron-3-ultra-free",
                                                        "deepseek-v4-flash-free"]
+
+
+def test_groq_fallback_chain_and_universal_default():
+    """Groq's flagship falls through llama-3.3-70b-versatile/gpt-oss-20b to the cheapest
+    llama-3.1-8b-instant; any slug not explicitly listed (e.g. a profile's OPUS/SONNET/
+    HAIKU slot) still gets a safety net via default_fallback instead of ending the turn
+    on the first 429/5xx."""
+    assert GROQ.chain_for("openai/gpt-oss-120b") == [
+        "openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b",
+        "llama-3.1-8b-instant"]
+    assert GROQ.chain_for("openai/gpt-oss-20b") == ["openai/gpt-oss-20b", "llama-3.1-8b-instant"]
+    assert GROQ.chain_for("some-unlisted-model") == [
+        "some-unlisted-model", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+
+
+def test_groq_default_model_used_when_model_omitted():
+    body = {"messages": [{"role": "user", "content": "x"}]}
+    assert tx.anthropic_to_openai(body, GROQ)["model"] == "openai/gpt-oss-120b"
+
+
+def test_groq_reasoning_extra_body_only_for_gpt_oss():
+    """Groq's reasoning knob (reasoning_effort/include_reasoning) is flat, unlike
+    OpenRouter's nested {"reasoning":{"enabled":true}} — and only the gpt-oss models
+    support it cleanly. llama-3.3-70b-versatile has no reasoning mode and must not get
+    the fields injected even when the client asks for extended thinking."""
+    base = {"messages": [{"role": "user", "content": "x"}],
+            "thinking": {"type": "enabled", "budget_tokens": 1024}}
+
+    reasoning_model = tx.anthropic_to_openai({**base, "model": "openai/gpt-oss-120b"}, GROQ)
+    assert reasoning_model["reasoning_effort"] == "high"
+    assert reasoning_model["include_reasoning"] is True
+
+    non_reasoning_model = tx.anthropic_to_openai(
+        {**base, "model": "llama-3.3-70b-versatile"}, GROQ)
+    assert "reasoning_effort" not in non_reasoning_model
+    assert "include_reasoning" not in non_reasoning_model
+
+
+def test_model_extra_body_applied_unconditionally():
+    """Unlike reasoning_extra_body, model_extra_body must apply even when the client
+    never asks for extended thinking, and only to the model it names."""
+    provider = ProviderConfig(name="p", flavor="openai", base_url="http://u", api_key_env="K",
+                              model_extra_body={"m": {"reasoning_effort": "none"}})
+    no_thinking = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+    assert tx.anthropic_to_openai(no_thinking, provider)["reasoning_effort"] == "none"
+
+    other_model = {**no_thinking, "model": "other"}
+    assert "reasoning_effort" not in tx.anthropic_to_openai(other_model, provider)
+
+
+def test_groq_qwen36_gets_reasoning_disabled_unconditionally():
+    """qwen/qwen3.6-27b (Fable slot) leaks raw <think> tags into content by default —
+    reasoning_effort:"none" must be sent on every request for it, thinking or not,
+    while an unrelated model (e.g. the Opus slot's gpt-oss-120b) is unaffected."""
+    body = {"model": "qwen/qwen3.6-27b", "messages": [{"role": "user", "content": "x"}]}
+    assert tx.anthropic_to_openai(body, GROQ)["reasoning_effort"] == "none"
+
+    opus_body = {**body, "model": "openai/gpt-oss-120b"}
+    assert "reasoning_effort" not in tx.anthropic_to_openai(opus_body, GROQ)
 
 
 def test_load_providers_ignores_comment_key(tmp_path, monkeypatch):

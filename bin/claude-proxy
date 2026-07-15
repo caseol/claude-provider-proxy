@@ -24,13 +24,14 @@ else HOME_DIR="$HOME/Workspace/claude-provider-proxy"; fi
 port_up() { ss -tlnp "sport = :$PORT" 2>/dev/null | grep -q LISTEN; }
 
 # Provider -> short A2A lane name (keeps A2A lanes consistent with the old setup).
-lane_of() { case "$1" in opencode-go) echo go;; opencode-zen) echo zen;; nvidia) echo nv;; openrouter) echo or;; *) echo "$1";; esac; }
+lane_of() { case "$1" in opencode-go) echo go;; opencode-zen) echo zen;; nvidia) echo nv;; openrouter) echo or;; groq) echo gq;; *) echo "$1";; esac; }
 # Provider -> default model for unset slots.
 default_model() { case "$1" in
   opencode-go) echo kimi-k2.7-code;;
   opencode-zen) echo deepseek-v4-flash-free;;
   nvidia) echo deepseek-ai/deepseek-v4-flash;;
   openrouter) echo deepseek/deepseek-v4-flash;;
+  groq) echo openai/gpt-oss-120b;;
   *) echo "";; esac; }
 
 # ── daemon control ────────────────────────────────────────────────

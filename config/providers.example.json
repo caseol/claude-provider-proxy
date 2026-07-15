@@ -1,5 +1,5 @@
 {
-  "_comment": "Overrides/additions merged over the built-in providers (opencode-go, opencode-zen, nvidia, openrouter). Copy to ~/.config/claude-provider-proxy/providers.json and edit. API keys come from ~/.config/claude-provider-proxy/.env (referenced by api_key_env).",
+  "_comment": "Overrides/additions merged over the built-in providers (opencode-go, opencode-zen, nvidia, openrouter, groq). Copy to ~/.config/claude-provider-proxy/providers.json and edit. API keys come from ~/.config/claude-provider-proxy/.env (referenced by api_key_env).",
 
   "opencode-zen": {
     "fallbacks": {
