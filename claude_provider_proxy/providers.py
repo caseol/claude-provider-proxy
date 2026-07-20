@@ -49,6 +49,17 @@ class ProviderConfig:
     # markers. Only enable for backends verified to accept role:"tool" — markers stay
     # the safe default for unknown OpenAI-compatible endpoints.
     native_tool_history: bool = False
+    # Per-model opt-in on top of the provider-wide flag above — for aggregators like
+    # OpenRouter that host many unrelated model families under one provider, flipping
+    # native_tool_history globally would apply it to families never verified live.
+    # Verified 2026-07-19: feeding kimi-k2.7-code its own PAST tool calls as
+    # [tool_use:]/[tool_result:] TEXT markers conditioned it to mimic that literal
+    # syntax for its OWN new tool calls (hallucinated markers with reused ids, logged
+    # as "marker 'Read' reused tool_use id ..." — Claude Code's harness then reported
+    # "[Tool use interrupted]" because a marker embedded in content isn't a real
+    # tool_use block it can execute). Native tool_calls + role:"tool" round-tripped
+    # cleanly for the whole Kimi family on OpenRouter, breaking that feedback loop.
+    native_tool_history_models: set[str] = field(default_factory=set)
     # Extra top-level request fields injected when the client asks for extended
     # thinking (Anthropic `thinking: {"type": "enabled"}`) AND the model is in
     # reasoning_models — each backend names its reasoning knob differently, e.g.
@@ -157,18 +168,53 @@ BUILTIN: dict[str, dict] = {
         },
         # DeepSeek v4 no OpenRouter suporta reasoning (supported_parameters: reasoning,
         # effort xhigh/high). O knob unificado do OpenRouter é o campo `reasoning`.
-        "reasoning_models": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"],
+        # kimi-k3 e kimi-k2-thinking entraram aqui em 2026-07-18: verificado ao vivo que
+        # kimi-k3 SEM o param `reasoning` vaza o chain-of-thought cru dentro de `content`
+        # (texto tipo "The user just said... this is a simple greeting...", queimando
+        # max_tokens até finish_reason="length" e cortando o turno — sessões kimi3 do
+        # perfil openrouter ficavam interrompidas no slot Fable por causa disso).
+        # kimi-k2-thinking já isola o CoT em `message.reasoning` mesmo sem o param, mas
+        # herda o floor de min_tokens_reasoning abaixo para não zerar `content` com
+        # budgets apertados.
+        "reasoning_models": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro",
+                             "moonshotai/kimi-k3", "moonshotai/kimi-k2-thinking"],
         "reasoning_extra_body": {"reasoning": {"enabled": True}},
+        # kimi-k3 sempre raciocina internamente antes de responder — sem isto, o
+        # reasoning_extra_body acima só é injetado quando o cliente pede thinking
+        # explicitamente (Claude Code raramente pede isso nas chamadas normais do slot
+        # Fable), e o CoT continua vazando cru em content. Aplicado incondicionalmente
+        # (mesmo padrão do model_extra_body da Groq para qwen3.6-27b).
+        "model_extra_body": {"moonshotai/kimi-k3": {"reasoning": {"enabled": True}}},
+        # kimi-k3/kimi-k2-thinking sempre gastam parte do budget pensando (mesmo padrão
+        # do "always reasons" do deepseek-v4-flash-free na Zen); o floor default de 1024
+        # ainda deixava content vazio em turnos com max_tokens apertado.
+        "min_tokens_reasoning": 3072,
         "default_model": "deepseek/deepseek-v4-flash",
-        # Fallback robusto: os dois DeepSeek são reserva um do outro, e default_fallback
-        # é a rede de segurança universal para qualquer slug fora do dict (ex. slots
-        # OPUS/SONNET/HAIKU de um profile) — sem ele, um 429/503 encerraria o turno.
+        # Fallback robusto: os dois DeepSeek são reserva um do outro; a família Kimi tem
+        # sua própria cadeia (2026-07-18) para não pular direto pra um modelo de outra
+        # família — que muda de "personalidade" no meio da sessão — a cada 429/503.
+        # default_fallback continua a rede de segurança universal para qualquer slug
+        # fora do dict (ex. slots OPUS/SONNET/HAIKU de um profile não-Kimi).
         "fallbacks": {
             "deepseek/deepseek-v4-flash": ["deepseek/deepseek-v4-pro"],
             "deepseek/deepseek-v4-pro": ["deepseek/deepseek-v4-flash"],
+            "moonshotai/kimi-k3": ["moonshotai/kimi-k2.7-code", "deepseek/deepseek-v4-flash"],
+            "moonshotai/kimi-k2.7-code": ["moonshotai/kimi-k2.6", "deepseek/deepseek-v4-flash"],
+            "moonshotai/kimi-k2.6": ["moonshotai/kimi-k2.7-code", "deepseek/deepseek-v4-flash"],
+            "moonshotai/kimi-k2.5": ["moonshotai/kimi-k2.6", "deepseek/deepseek-v4-flash"],
+            "moonshotai/kimi-k2-thinking": ["moonshotai/kimi-k2.7-code", "deepseek/deepseek-v4-flash"],
+            "moonshotai/kimi-k2": ["moonshotai/kimi-k2.5", "deepseek/deepseek-v4-flash"],
         },
         "default_fallback": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"],
-        # native_tool_history desligado até verificar ao vivo o aceite de role:"tool".
+        # native_tool_history global desligado: DeepSeek/Qwen/etc. não foram verificados
+        # ao vivo. A família Kimi foi (2026-07-19, ver comentário no dataclass) — só ela
+        # entra no opt-in per-model.
+        # moonshotai/kimi-k2 (base, usado no perfil openrouter/kimi.env) entrou em
+        # 2026-07-19: não suporta o knob de reasoning (fora de supported_parameters,
+        # não vaza CoT), mas se beneficia da mesma correção de história nativa.
+        "native_tool_history_models": ["moonshotai/kimi-k3", "moonshotai/kimi-k2.7-code",
+                                       "moonshotai/kimi-k2.6", "moonshotai/kimi-k2.5",
+                                       "moonshotai/kimi-k2-thinking", "moonshotai/kimi-k2"],
     },
     "groq": {
         # Groq (LPU inference, https://api.groq.com/openai/v1) — OpenAI-compatível nativo.
@@ -228,6 +274,7 @@ def _make(name: str, d: dict) -> ProviderConfig:
         cache_control_strip=list(d.get("cache_control_strip", [])),
         transient_error_patterns=list(d.get("transient_error_patterns", [])),
         native_tool_history=bool(d.get("native_tool_history", False)),
+        native_tool_history_models=set(d.get("native_tool_history_models", [])),
         reasoning_extra_body=dict(d.get("reasoning_extra_body", {})),
         model_extra_body={k: dict(v) for k, v in d.get("model_extra_body", {}).items()},
         extra_headers=dict(d.get("extra_headers", {})),

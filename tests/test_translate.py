@@ -231,6 +231,50 @@ def test_native_tool_history_empty_result_placeholder():
     assert o["messages"][0]["content"] == "[empty result]"
 
 
+def test_native_tool_history_models_opts_in_per_model():
+    """A provider with native_tool_history=False can still opt specific models into
+    native tool_calls/role:"tool" via native_tool_history_models (OpenRouter's Kimi
+    family) without flipping the flag for every other model it aggregates."""
+    provider = ProviderConfig(name="agg", flavor="openai", base_url="http://u",
+                              api_key_env="K", native_tool_history=False,
+                              native_tool_history_models={"kimi-native"})
+    body = {"model": "kimi-native", "messages": [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "call_1", "name": "ls", "input": {}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "call_1", "content": "a.txt"},
+        ]},
+    ]}
+    o = tx.anthropic_to_openai(body, provider)
+    msgs = o["messages"]
+    assert msgs[0]["tool_calls"][0]["function"]["name"] == "ls"
+    assert msgs[1] == {"role": "tool", "tool_call_id": "call_1", "content": "a.txt"}
+
+
+def test_native_tool_history_models_does_not_affect_other_models():
+    """Same provider/messages as above, but for a model NOT in
+    native_tool_history_models: falls back to text markers, same as
+    native_tool_history=False everywhere."""
+    provider = ProviderConfig(name="agg", flavor="openai", base_url="http://u",
+                              api_key_env="K", native_tool_history=False,
+                              native_tool_history_models={"kimi-native"})
+    body = {"model": "other-model", "messages": [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "call_1", "name": "ls", "input": {}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "call_1", "content": "a.txt"},
+        ]},
+    ]}
+    o = tx.anthropic_to_openai(body, provider)
+    msgs = o["messages"]
+    assert "tool_calls" not in msgs[0]
+    assert "[tool_use: ls" in msgs[0]["content"]
+    assert msgs[1]["role"] == "user"
+    assert "[tool_result:" in msgs[1]["content"]
+
+
 def test_marker_mode_unchanged_by_default():
     """Same round-trip as test_native_tool_history_full_round_trip, but on a provider
     without native_tool_history: markers stay the default, no role:"tool"/tool_calls."""

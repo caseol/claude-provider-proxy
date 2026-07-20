@@ -1,6 +1,6 @@
 [project]
 name = "claude-provider-proxy"
-version = "0.1.0"
+version = "0.2.0"
 description = "One local proxy to run Claude Code against any model backend (OpenCode Go/Zen, NVIDIA, or your own), with per-provider profiles."
 readme = "README.md"
 requires-python = ">=3.11"

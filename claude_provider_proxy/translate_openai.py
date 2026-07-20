@@ -147,8 +147,8 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
     system_str = _flatten_system(system)
     if system_str:
         openai_messages.append({"role": "system", "content": system_str})
-    openai_messages.extend(convert_messages(messages_data,
-                                            native_tools=provider.native_tool_history))
+    native_tools = provider.native_tool_history or model in provider.native_tool_history_models
+    openai_messages.extend(convert_messages(messages_data, native_tools=native_tools))
 
     out: dict = {
         "model": model,
