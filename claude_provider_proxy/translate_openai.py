@@ -73,6 +73,47 @@ def _non_empty(s: str, placeholder: str) -> str:
     return s if s.strip() else placeholder
 
 
+def _normalize_tool_schema(schema: dict) -> dict:
+    """Normalize JSON Schema for OpenAI compatibility.
+
+    Handles:
+    - anyOf/oneOf without explicit type: extract type from first alternative or default to 'string'
+    - Properties without type: ensure each property has a valid type
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    schema = copy.deepcopy(schema)
+
+    if "properties" not in schema:
+        return schema
+
+    props = schema.get("properties", {})
+    for prop_name, prop_def in props.items():
+        if not isinstance(prop_def, dict):
+            continue
+
+        # If property has no 'type' but has 'anyOf' or 'oneOf', extract the type
+        if "type" not in prop_def and ("anyOf" in prop_def or "oneOf" in prop_def):
+            alts = prop_def.get("anyOf") or prop_def.get("oneOf", [])
+            if alts and isinstance(alts, list):
+                # Use the first alternative's type, or default to 'string'
+                first_alt = alts[0]
+                if isinstance(first_alt, dict) and "type" in first_alt:
+                    prop_def["type"] = first_alt["type"]
+                    # Preserve enum if present
+                    if "enum" in first_alt:
+                        prop_def["enum"] = first_alt["enum"]
+                else:
+                    prop_def["type"] = "string"
+
+        # If still no type, default to 'string'
+        if "type" not in prop_def:
+            prop_def["type"] = "string"
+
+    return schema
+
+
 def _merge_consecutive(msgs: list[dict]) -> list[dict]:
     """Merge adjacent plain-text messages of the same role. Anthropic allows repeated
     roles; some OpenAI-compatible backends require strict alternation. Never merges
@@ -166,7 +207,7 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
         out["tools"] = [{"type": "function",
                          "function": {"name": t["name"],
                                       "description": t.get("description", ""),
-                                      "parameters": t.get("input_schema", {})}}
+                                      "parameters": _normalize_tool_schema(t.get("input_schema", {}))}}
                         for t in body["tools"]]
     if "stop_sequences" in body:
         out["stop"] = body["stop_sequences"]
