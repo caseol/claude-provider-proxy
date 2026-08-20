@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+- UFRJ LLM.LAND (`land`) as a built-in provider, pointing to the LiteLLM OpenAI-compatible
+  proxy at `https://llm.land.ufrj.br/v1`. Uses `LAND_API_KEY`. Verified live:
+  `kimi-k2.7-code-cloud` accepts native `assistant.tool_calls` + `role:"tool"` round-trips
+  and emits `reasoning_content`, so `native_tool_history: true` and a reasoning-token floor
+  are enabled for it. No fixed `default_model` is shipped because the available catalog
+  depends on the team's virtual key; users discover it via `/v1/models` and fill a profile
+  or `providers.json` override.
+- Fallback chain for `land` cycling its 3 `*-cloud` models (`kimi-k2.7-code-cloud` ↔
+  `glm-5.2-cloud` ↔ `minimax-m3-cloud`), matching the pattern used by `gemini`/`groq`.
+  Added after a live incident (2026-08-07) where every `land` call hit 429 with
+  `fallback chain exhausted` immediately — the provider had no `fallbacks`/
+  `default_fallback` configured at all. Note the specific 429 seen was a per-key
+  monthly usage cap ("extra usage auto reload monthly max reached"), which switching
+  models can't route around; the chain still protects against per-model rate limits
+  and transient 5xx on an individual backend.
+- Google Gemini as a built-in provider (`gemini`), using the OpenAI-compatible endpoint
+  `https://generativelanguage.googleapis.com/v1beta/openai`. Ships with model fallback
+  chains (`gemini-2.5-pro` → `gemini-2.5-flash` → `gemini-2.5-flash-lite` → `gemini-2.0-flash`)
+  and a proposed slot mapping (Pro for Fable/Opus, Flash for Sonnet/Subagent, Flash Lite
+  for Haiku). `native_tool_history` is off by default until role:`"tool"` acceptance is
+  verified live — text markers are the safe fallback.
+
 ## [0.2.0] — 2026-07-20
 
 ### Added

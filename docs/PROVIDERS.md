@@ -1,7 +1,7 @@
 # Providers
 
 A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
-`opencode-zen`, `nvidia`, `openrouter`, `groq`. Add/override in `~/.config/claude-provider-proxy/providers.json`
+`opencode-zen`, `nvidia`, `openrouter`, `groq`, `gemini`, `land`. Add/override in `~/.config/claude-provider-proxy/providers.json`
 (deep-merged over the built-ins). Keys come from `~/.config/claude-provider-proxy/.env`.
 
 ## ProviderConfig fields
@@ -76,6 +76,37 @@ A **provider** is a backend the proxy routes to. Built-ins: `opencode-go`,
                   // the same treatment before use).
                   // native_tool_history:true — verified live (2026-07-15): Groq accepts
                   // assistant.tool_calls + role:"tool" natively.
+"gemini":       { flavor:"openai", base_url:"https://generativelanguage.googleapis.com/v1beta/openai",
+                  api_key_env:"GEMINI_API_KEY", auth:"bearer",
+                  reasoning_models:["gemini-2.5-pro","gemini-2.5-flash"],
+                  default_model:"gemini-2.5-flash",
+                  fallbacks:{"gemini-2.5-pro":["gemini-2.5-flash","gemini-2.5-flash-lite"],
+                             "gemini-2.5-flash":["gemini-2.5-flash-lite","gemini-2.0-flash"],
+                             "gemini-2.5-flash-lite":["gemini-2.0-flash"],
+                             "gemini-2.0-flash":["gemini-2.5-flash-lite"]},
+                  default_fallback:["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-2.0-flash"],
+                  native_tool_history:false }
+                  // native_tool_history:false until role:"tool" acceptance is verified live.
+                  // Gemini's OpenAI compatibility layer supports function calling; markers
+                  // ([tool_use:]/[tool_result:]) are the safe fallback. Flip to true after
+                  // verifying a real round-trip with tool_call_id.
+"land":         { flavor:"openai", base_url:"https://llm.land.ufrj.br/v1",
+                  api_key_env:"LAND_API_KEY", auth:"bearer",
+                  native_tool_history:true,
+                  reasoning_models:["kimi-k2.7-code-cloud"],
+                  fallbacks:{"kimi-k2.7-code-cloud":["glm-5.2-cloud","minimax-m3-cloud"],
+                             "glm-5.2-cloud":["minimax-m3-cloud","kimi-k2.7-code-cloud"],
+                             "minimax-m3-cloud":["glm-5.2-cloud","kimi-k2.7-code-cloud"]},
+                  default_fallback:["glm-5.2-cloud","minimax-m3-cloud","kimi-k2.7-code-cloud"] }
+                  // UFRJ LLM.LAND LiteLLM proxy. The model catalog is team/key-specific;
+                  // discover it with /v1/models and fill a profile or override default_model.
+                  // Verified live: kimi-k2.7-code-cloud accepts role:"tool" round-trips and
+                  // emits reasoning_content, so a min_tokens floor is applied to it.
+                  // Fallback chain cycles the 3 "*-cloud" models. Note: the 429s seen live
+                  // (2026-08-07) were "extra usage auto reload monthly max reached" — a
+                  // per-key monthly cap, not per-model — so switching models won't dodge
+                  // that specific case. The chain still helps with per-model rate limits
+                  // and transient 5xx from an individual backend.
 ```
 
 ## Adding a provider

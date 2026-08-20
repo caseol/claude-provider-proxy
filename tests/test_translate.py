@@ -13,6 +13,8 @@ from claude_provider_proxy.providers import load_providers, ProviderConfig  # no
 
 ZEN = load_providers()["opencode-zen"]
 GROQ = load_providers()["groq"]
+GEMINI = load_providers()["gemini"]
+LAND = load_providers()["land"]
 NATIVE = ProviderConfig(name="nt", flavor="openai", base_url="http://u", api_key_env="K",
                         native_tool_history=True)
 
@@ -510,6 +512,91 @@ def test_groq_fallback_chain_and_universal_default():
 def test_groq_default_model_used_when_model_omitted():
     body = {"messages": [{"role": "user", "content": "x"}]}
     assert tx.anthropic_to_openai(body, GROQ)["model"] == "openai/gpt-oss-120b"
+
+
+def test_gemini_default_model_and_fallback_chains():
+    assert GEMINI.default_model == "gemini-2.5-flash"
+    assert GEMINI.chain_for("gemini-2.5-pro") == [
+        "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    assert GEMINI.chain_for("gemini-2.5-flash") == [
+        "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+    # unknown slugs fall through to the universal safety net
+    assert GEMINI.chain_for("gemini-1.5-flash") == [
+        "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+
+
+def test_gemini_reasoning_token_floor():
+    body = {"model": "gemini-2.5-pro", "max_tokens": 10,
+            "messages": [{"role": "user", "content": "x"}]}
+    o = tx.anthropic_to_openai(body, GEMINI)
+    assert o["max_tokens"] == GEMINI.min_tokens_reasoning == 1024
+
+
+def test_gemini_native_tool_history_disabled_by_default():
+    body = {"model": "gemini-2.5-flash", "messages": [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "ls", "input": {}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "a.txt"}]},
+    ]}
+    o = tx.anthropic_to_openai(body, GEMINI)
+    msgs = o["messages"]
+    assert "tool_calls" not in msgs[0]
+    assert "[tool_use: ls" in msgs[0]["content"]
+    assert msgs[1]["role"] == "user"
+    assert "[tool_result:" in msgs[1]["content"]
+
+
+def test_land_provider_configuration():
+    """The UFRJ LLM.LAND LiteLLM proxy is registered as an OpenAI-flavor provider.
+    It has no fixed default_model because the catalog is key-specific; the user
+    fills it via a profile or providers.json override."""
+    assert LAND.flavor == "openai"
+    assert LAND.base_url == "https://llm.land.ufrj.br/v1"
+    assert LAND.api_key_env == "LAND_API_KEY"
+    assert LAND.auth == "bearer"
+    assert LAND.default_model is None
+
+
+def test_land_native_tool_history_enabled():
+    """Verified live (2026-08-07): land's kimi-k2.7-code-cloud round-trips
+    assistant.tool_calls + role:'tool' natively."""
+    assert LAND.native_tool_history is True
+    body = {"model": "kimi-k2.7-code-cloud", "messages": [
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "ls", "input": {}}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "a.txt"}]},
+    ]}
+    o = tx.anthropic_to_openai(body, LAND)
+    msgs = o["messages"]
+    assert msgs[0]["tool_calls"][0]["function"]["name"] == "ls"
+    assert msgs[1] == {"role": "tool", "tool_call_id": "t1", "content": "a.txt"}
+
+
+def test_land_fallback_chains():
+    """Added after a live incident (2026-08-07): land had no fallbacks/default_fallback
+    configured, so every 429 exhausted the chain instantly. The chain cycles the 3
+    "*-cloud" models; it won't dodge a per-key monthly cap, but covers per-model
+    rate limits and transient 5xx."""
+    assert LAND.chain_for("kimi-k2.7-code-cloud") == [
+        "kimi-k2.7-code-cloud", "glm-5.2-cloud", "minimax-m3-cloud"]
+    assert LAND.chain_for("glm-5.2-cloud") == [
+        "glm-5.2-cloud", "minimax-m3-cloud", "kimi-k2.7-code-cloud"]
+    assert LAND.chain_for("minimax-m3-cloud") == [
+        "minimax-m3-cloud", "glm-5.2-cloud", "kimi-k2.7-code-cloud"]
+    # unknown slugs fall through to the universal safety net
+    assert LAND.chain_for("land") == [
+        "land", "glm-5.2-cloud", "minimax-m3-cloud", "kimi-k2.7-code-cloud"]
+
+
+def test_land_reasoning_token_floor_for_kimi():
+    """kimi-k2.7-code-cloud emits reasoning_content; its max_tokens is floored
+    so reasoning doesn't starve the answer."""
+    body = {"model": "kimi-k2.7-code-cloud", "max_tokens": 10,
+            "messages": [{"role": "user", "content": "x"}]}
+    o = tx.anthropic_to_openai(body, LAND)
+    assert o["max_tokens"] == LAND.min_tokens_reasoning == 1024
 
 
 def test_groq_reasoning_extra_body_only_for_gpt_oss():

@@ -258,6 +258,64 @@ BUILTIN: dict[str, dict] = {
         # chamada, não só quando o cliente pede extended thinking.
         "model_extra_body": {"qwen/qwen3.6-27b": {"reasoning_effort": "none"}},
     },
+    "gemini": {
+        # Google Gemini via camada OpenAI-compatível do Google AI Studio / Vertex.
+        # Endpoint: https://ai.google.dev/gemini-api/docs/openai
+        "flavor": "openai",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key_env": "GEMINI_API_KEY",
+        "auth": "bearer",
+        # gemini-2.5-pro e gemini-2.5-flash fazem reasoning interno (chain-of-thought)
+        # antes de responder; o floor evita que o modelo gaste todo o max_tokens
+        # pensando e devolva content vazio em budgets apertados.
+        "reasoning_models": ["gemini-2.5-pro", "gemini-2.5-flash"],
+        "default_model": "gemini-2.5-flash",
+        "fallbacks": {
+            "gemini-2.5-pro": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
+            "gemini-2.5-flash": ["gemini-2.5-flash-lite", "gemini-2.0-flash"],
+            "gemini-2.5-flash-lite": ["gemini-2.0-flash"],
+            "gemini-2.0-flash": ["gemini-2.5-flash-lite"],
+        },
+        # Qualquer slug não listado acima (ex. um profile customizado) cai na rede
+        # de segurança: flash -> flash-lite -> 2.0-flash.
+        "default_fallback": ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
+        # native_tool_history fica OFF por padrão: a compatibilidade OpenAI do Gemini
+        # suporta function calling, mas a aceitação de role:"tool" com tool_call_id
+        # ainda não foi verificada ao vivo. Com a flag desligada, o proxy usa text
+        # markers ([tool_use:]/[tool_result:]), que são o fallback seguro. Após
+        # verificar round-trip nativo, mude para true (aqui ou no providers.json).
+        "native_tool_history": False,
+    },
+    "land": {
+        # LiteLLM Proxy da UFRJ (https://llm.land.ufrj.br) — OpenAI-compatible.
+        # O catálogo exato de modelos depende da virtual key do time; descubra com
+        #   curl -s https://llm.land.ufrj.br/v1/models -H "Authorization: Bearer $LAND_API_KEY"
+        # e preencha o default_model ou um profile em ~/.config/claude-provider-proxy/profiles/land/.
+        "flavor": "openai",
+        "base_url": "https://llm.land.ufrj.br/v1",
+        "api_key_env": "LAND_API_KEY",
+        "auth": "bearer",
+        # Verificado ao vivo (2026-08-07): kimi-k2.7-code-cloud round-trips
+        # assistant.tool_calls + role:"tool" nativamente e responde de forma coerente.
+        "native_tool_history": True,
+        # kimi-k2.7-code-cloud gera reasoning_content antes da resposta; o floor
+        # evita que o modelo gaste todo o max_tokens pensando e devolva content vazio.
+        "reasoning_models": ["kimi-k2.7-code-cloud"],
+        # Cadeia entre os 3 modelos "*-cloud" da virtual key (2026-08-07). Nota: o 429
+        # observado ao vivo nesse provider foi "extra usage auto reload monthly max
+        # reached" — um teto mensal *por chave*, não por modelo — então a troca de
+        # modelo não contorna esse caso específico. A cadeia continua útil para
+        # rate-limits por modelo (TPM/RPM individuais do LiteLLM) e para 5xx pontual
+        # de um dos backends.
+        "fallbacks": {
+            "kimi-k2.7-code-cloud": ["glm-5.2-cloud", "minimax-m3-cloud"],
+            "glm-5.2-cloud": ["minimax-m3-cloud", "kimi-k2.7-code-cloud"],
+            "minimax-m3-cloud": ["glm-5.2-cloud", "kimi-k2.7-code-cloud"],
+        },
+        # Rede de segurança para qualquer slug fora da lista acima (ex. um profile
+        # customizado ou modelo novo adicionado à virtual key).
+        "default_fallback": ["glm-5.2-cloud", "minimax-m3-cloud", "kimi-k2.7-code-cloud"],
+    },
 }
 
 
