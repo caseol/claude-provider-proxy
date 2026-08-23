@@ -9,7 +9,7 @@ CFG="$HOME/.config/claude-provider-proxy"
 mkdir -p "$BIN" "$CFG/profiles"
 
 echo "CLAUDE_PROVIDER_PROXY_HOME=$REPO" > "$CFG/env"
-install -m 0755 "$REPO/bin/claude-proxy" "$BIN/claude-proxy"
+ln -sf "$REPO/bin/claude-proxy" "$BIN/claude-proxy"
 
 # Seed .env by importing keys from the old per-provider configs (if present).
 if [ ! -f "$CFG/.env" ]; then

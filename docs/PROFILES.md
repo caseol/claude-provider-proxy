@@ -35,6 +35,24 @@ claude-proxy profile <provider> list           # tables profiles + slots, marks 
 claude-proxy profile <provider> use <name>     # set active (use 'none' to clear)
 claude-proxy profile <provider> show [name]    # print a profile
 claude-proxy profile <provider> new <name>     # scaffold a profile
+claude-proxy profile <provider> edit [name]    # interactively assign models to slots
+```
+
+### Interactive slot editor
+
+`claude-proxy profile <provider> edit [name]` picks a slot (Fable/Opus/Sonnet/Haiku/
+Subagent), fetches the provider's live model catalog (via the daemon's
+`GET /<provider>/v1/models`, starting the daemon if needed), lets you filter and pick a
+model by number, and writes the choice into that slot in the profile's `.env` file. Loops
+so you can fill several slots in one pass; type `0` to stop.
+
+If `name` is omitted, it edits the provider's active profile, or lets you pick/create one
+from a menu. Since `claude-proxy <provider>` re-reads the profile file on every launch, an
+edit to the active profile takes effect on the very next run — no daemon restart or
+explicit "reload" needed.
+
+```bash
+claude-proxy profile openrouter edit fast
 ```
 
 ## Launch with a profile

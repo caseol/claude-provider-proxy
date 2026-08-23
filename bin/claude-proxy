@@ -2,7 +2,7 @@
 # claude-proxy — launch Claude Code against a chosen backend provider.
 #
 #   claude-proxy <provider> [--profile <name>] [-- <claude args>]
-#   claude-proxy profile <provider> {list|use <name>|show [name]|new <name>}
+#   claude-proxy profile <provider> {list|use <name>|show [name]|new <name>|edit [name]}
 #   claude-proxy daemon {start|stop|status|logs}
 #
 # The daemon (single FastAPI process) is shared by all providers; the provider is
@@ -95,8 +95,130 @@ HAIKU_MODEL=$dm
 SUBAGENT_MODEL=$dm
 EOF
       echo "criado: $t" ;;
-    *) echo "uso: claude-proxy profile <provider> <list|use|show|new>"; exit 1 ;;
+    edit) profile_edit "$provider" "$name" ;;
+    *) echo "uso: claude-proxy profile <provider> <list|use|show|new|edit>"; exit 1 ;;
   esac
+}
+
+# ── interactive slot editor: pick a slot, list live models from the
+#    provider, assign the chosen model id to that slot in the profile ──
+profile_edit() {
+  local provider="$1" name="$2"
+  [ -z "$provider" ] && { echo "uso: claude-proxy profile <provider> edit [nome]"; exit 1; }
+  local pdir="$PROFILES/$provider"; local active="$pdir/active_profile"
+  mkdir -p "$pdir"
+
+  local dm; dm=$(default_model "$provider")
+  scaffold_profile() {
+    cat >"$pdir/$1.env" <<EOF
+FABLE_MODEL=$dm
+OPUS_MODEL=$dm
+SONNET_MODEL=$dm
+HAIKU_MODEL=$dm
+SUBAGENT_MODEL=$dm
+EOF
+  }
+
+  if [ -z "$name" ] && [ -f "$active" ]; then name=$(cat "$active"); fi
+  if [ -z "$name" ]; then
+    local names=(); for f in "$pdir"/*.env; do [ -f "$f" ] && names+=("$(basename "$f" .env)"); done
+    if [ "${#names[@]}" -gt 0 ]; then
+      echo "Perfis existentes em $provider:"
+      local i=1; for n in "${names[@]}"; do echo "  $i) $n"; i=$((i+1)); done
+      echo "  n) criar novo perfil"
+      read -rp "Escolha: " choice
+      if [ "$choice" = "n" ]; then
+        read -rp "Nome do novo perfil: " name
+        [ -z "$name" ] && { echo "nome vazio, abortando"; return 1; }
+        scaffold_profile "$name"
+      elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#names[@]}" ]; then
+        name="${names[$((choice-1))]}"
+      else
+        echo "escolha inválida"; return 1
+      fi
+    else
+      read -rp "Nenhum perfil existe ainda. Nome do novo perfil: " name
+      [ -z "$name" ] && { echo "nome vazio, abortando"; return 1; }
+      scaffold_profile "$name"
+    fi
+  fi
+
+  local pf="$pdir/$name.env"
+  [ -f "$pf" ] || { echo "perfil '$name' não existe em $pdir"; return 1; }
+
+  port_up || daemon start >/dev/null
+
+  echo "Buscando modelos de '$provider'..."
+  local tmpf; tmpf=$(mktemp)
+  curl -s "http://127.0.0.1:$PORT/$provider/v1/models" >"$tmpf"
+  mapfile -t model_ids < <("$PY" - "$tmpf" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    try:
+        data = json.load(f)
+    except Exception:
+        sys.exit(0)
+for m in data.get("data", []):
+    mid = m.get("id")
+    if mid:
+        print(mid)
+PYEOF
+)
+  rm -f "$tmpf"
+  if [ "${#model_ids[@]}" -eq 0 ]; then
+    echo "não foi possível listar modelos de '$provider' (daemon no ar? chave configurada em ~/.config/claude-provider-proxy/.env?)"
+    return 1
+  fi
+  mapfile -t model_ids < <(printf '%s\n' "${model_ids[@]}" | sort -u)
+
+  while true; do
+    echo
+    echo "Perfil: $provider/$name"
+    grep -E '^(FABLE|OPUS|SONNET|HAIKU|SUBAGENT)_MODEL=' "$pf" | sed 's/^/  /'
+    echo
+    echo "  1) FABLE_MODEL   2) OPUS_MODEL   3) SONNET_MODEL   4) HAIKU_MODEL   5) SUBAGENT_MODEL   0) sair"
+    read -rp "Slot a editar: " slot_choice
+    local slot=""
+    case "$slot_choice" in
+      1) slot=FABLE_MODEL ;;
+      2) slot=OPUS_MODEL ;;
+      3) slot=SONNET_MODEL ;;
+      4) slot=HAIKU_MODEL ;;
+      5) slot=SUBAGENT_MODEL ;;
+      0|"") break ;;
+      *) echo "opção inválida"; continue ;;
+    esac
+
+    read -rp "Filtrar modelos (vazio = todos): " filter
+    local i=1; local filtered=()
+    for mid in "${model_ids[@]}"; do
+      if [ -z "$filter" ] || [[ "$mid" == *"$filter"* ]]; then
+        filtered+=("$mid"); printf "  %3d) %s\n" "$i" "$mid"; i=$((i+1))
+      fi
+    done
+    if [ "${#filtered[@]}" -eq 0 ]; then echo "nenhum modelo bate com o filtro"; continue; fi
+
+    read -rp "Modelo (número, vazio p/ cancelar): " midx
+    [ -z "$midx" ] && continue
+    if ! [[ "$midx" =~ ^[0-9]+$ ]] || [ "$midx" -lt 1 ] || [ "$midx" -gt "${#filtered[@]}" ]; then
+      echo "índice inválido"; continue
+    fi
+    local chosen="${filtered[$((midx-1))]}"
+    if grep -q "^${slot}=" "$pf"; then
+      sed -i "s|^${slot}=.*|${slot}=${chosen}|" "$pf"
+    else
+      echo "${slot}=${chosen}" >>"$pf"
+    fi
+    echo "OK: ${slot} -> ${chosen}"
+  done
+
+  echo
+  echo "Perfil salvo: $pf"
+  if [ -f "$active" ] && [ "$(cat "$active")" = "$name" ]; then
+    echo "Este é o perfil ativo — o próximo 'claude-proxy $provider' já usa os novos modelos."
+  else
+    echo "Ative com: claude-proxy profile $provider use $name"
+  fi
 }
 
 # ── dispatch ──────────────────────────────────────────────────────
