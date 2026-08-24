@@ -151,7 +151,7 @@ EOF
   echo "Buscando modelos de '$provider'..."
   local tmpf; tmpf=$(mktemp)
   curl -s "http://127.0.0.1:$PORT/$provider/v1/models" >"$tmpf"
-  mapfile -t model_ids < <("$PY" - "$tmpf" <<'PYEOF'
+  local model_lines; mapfile -t model_lines < <("$PY" - "$tmpf" <<'PYEOF'
 import json, sys
 with open(sys.argv[1]) as f:
     try:
@@ -160,16 +160,33 @@ with open(sys.argv[1]) as f:
         sys.exit(0)
 for m in data.get("data", []):
     mid = m.get("id")
-    if mid:
-        print(mid)
+    if not mid:
+        continue
+    free = "free" in mid.lower()
+    pricing = m.get("pricing")
+    if isinstance(pricing, dict):
+        try:
+            prompt_cost = float(pricing.get("prompt") or 0)
+            completion_cost = float(pricing.get("completion") or 0)
+            if prompt_cost == 0 and completion_cost == 0:
+                free = True
+        except (TypeError, ValueError):
+            pass
+    print(f"{mid}\t{1 if free else 0}")
 PYEOF
 )
   rm -f "$tmpf"
-  if [ "${#model_ids[@]}" -eq 0 ]; then
+  if [ "${#model_lines[@]}" -eq 0 ]; then
     echo "não foi possível listar modelos de '$provider' (daemon no ar? chave configurada em ~/.config/claude-provider-proxy/.env?)"
     return 1
   fi
-  mapfile -t model_ids < <(printf '%s\n' "${model_ids[@]}" | sort -u)
+  mapfile -t model_lines < <(printf '%s\n' "${model_lines[@]}" | sort -u -t $'\t' -k1,1)
+  local model_ids=(); local -A model_free=()
+  local line mid flag
+  for line in "${model_lines[@]}"; do
+    mid="${line%%$'\t'*}"; flag="${line##*$'\t'}"
+    model_ids+=("$mid"); model_free["$mid"]="$flag"
+  done
 
   while true; do
     echo
@@ -189,11 +206,15 @@ PYEOF
       *) echo "opção inválida"; continue ;;
     esac
 
-    read -rp "Filtrar modelos (vazio = todos): " filter
+    read -rp "Filtrar modelos (vazio = todos, 'free' = só grátis): " filter
+    local filter_free=0
+    if [ "${filter,,}" = "free" ]; then filter_free=1; filter=""; fi
     local i=1; local filtered=()
     for mid in "${model_ids[@]}"; do
+      [ "$filter_free" -eq 1 ] && [ "${model_free[$mid]}" != "1" ] && continue
       if [ -z "$filter" ] || [[ "$mid" == *"$filter"* ]]; then
-        filtered+=("$mid"); printf "  %3d) %s\n" "$i" "$mid"; i=$((i+1))
+        local mark=""; [ "${model_free[$mid]}" = "1" ] && mark="  [grátis]"
+        filtered+=("$mid"); printf "  %3d) %s%s\n" "$i" "$mid" "$mark"; i=$((i+1))
       fi
     done
     if [ "${#filtered[@]}" -eq 0 ]; then echo "nenhum modelo bate com o filtro"; continue; fi

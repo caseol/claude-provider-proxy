@@ -46,6 +46,11 @@ Subagent), fetches the provider's live model catalog (via the daemon's
 model by number, and writes the choice into that slot in the profile's `.env` file. Loops
 so you can fill several slots in one pass; type `0` to stop.
 
+Free models are marked `[grátis]` in the listing — detected from OpenRouter's `pricing`
+field (prompt/completion cost both zero) or from a `free` substring in the model id (the
+`-free`/`:free` naming convention used by opencode-zen, opencode-go, OpenRouter). Type
+`free` at the filter prompt to show only free models for that slot.
+
 If `name` is omitted, it edits the provider's active profile, or lets you pick/create one
 from a menu. Since `claude-proxy <provider>` re-reads the profile file on every launch, an
 edit to the active profile takes effect on the very next run — no daemon restart or
