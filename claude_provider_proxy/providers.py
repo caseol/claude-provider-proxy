@@ -199,8 +199,19 @@ BUILTIN: dict[str, dict] = {
         # kimi-k2-thinking já isola o CoT em `message.reasoning` mesmo sem o param, mas
         # herda o floor de min_tokens_reasoning abaixo para não zerar `content` com
         # budgets apertados.
+        # A família Qwen 3.7 entrou em 2026-08-26 pelo mesmo motivo do kimi-k2-thinking
+        # (floor, não vazamento): servida pela Alibaba no OpenRouter, ela SEMPRE raciocina
+        # e emite tudo em `delta.reasoning` com `delta.content` vazio. Verificado ao vivo
+        # direto na API: 33 chunks de reasoning contra 34 de content todos vazios. Com o
+        # max_tokens pequeno das chamadas de streaming do Claude Code (~120), o budget
+        # inteiro é gasto pensando e o turno chega vazio — o perfil `qwen` ficava com os
+        # três slots distintos mudos (3/3 max, 2/2 plus, 2/2 flash). Com o floor de 3072,
+        # 3/3 voltaram a responder. A geração 3.8 escapa por raciocinar menos (~110ch
+        # contra ~350ch da 3.7) mas entra junto: o floor não a prejudica.
         "reasoning_models": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro",
-                             "moonshotai/kimi-k3", "moonshotai/kimi-k2-thinking"],
+                             "moonshotai/kimi-k3", "moonshotai/kimi-k2-thinking",
+                             "qwen/qwen3.7-max", "qwen/qwen3.7-plus", "qwen/qwen3.7-flash",
+                             "qwen/qwen3.6-flash", "qwen/qwen3.8-max"],
         "reasoning_extra_body": {"reasoning": {"enabled": True}},
         # kimi-k3 sempre raciocina internamente antes de responder — sem isto, o
         # reasoning_extra_body acima só é injetado quando o cliente pede thinking
