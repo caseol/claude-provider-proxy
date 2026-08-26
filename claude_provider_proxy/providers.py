@@ -147,9 +147,15 @@ BUILTIN: dict[str, dict] = {
         # step-3.7-flash reasons before answering (reasoning_content); without the
         # token floor it burns small max_tokens budgets entirely on reasoning and
         # returns empty content.
-        "reasoning_models": ["deepseek-ai/deepseek-v4-flash", "deepseek-ai/deepseek-v4-pro",
+        #
+        # 2026-08-26: o catálogo do NIM rotacionou. `deepseek-ai/deepseek-v4-flash`
+        # (sem sufixo) e `deepseek-ai/deepseek-v4-pro` saíram do catálogo — o slug
+        # atual é `deepseek-ai/deepseek-v4-flash-0731`, verificado ao vivo
+        # (tool_use + tool_result convergindo). Não há mais nenhum modelo Qwen no
+        # NIM, então as cadeias de fallback para qwen3-next também morreram.
+        "reasoning_models": ["deepseek-ai/deepseek-v4-flash-0731",
                              "stepfun-ai/step-3.7-flash"],
-        "default_model": "deepseek-ai/deepseek-v4-flash",
+        "default_model": "deepseek-ai/deepseek-v4-flash-0731",
         # Verified live (2026-07-05): NIM accepts native tool history (503s seen
         # during probing were the usual ResourceExhausted capacity flakiness).
         "native_tool_history": True,
