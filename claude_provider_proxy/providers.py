@@ -107,7 +107,20 @@ BUILTIN: dict[str, dict] = {
         "api_key_env": "OC_GO_CC_API_KEY",
         "auth": "bearer",
         "reasoning_models": ["kimi-k2.7-code", "qwen3.7-max", "qwen3.7-plus",
-                             "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2"],
+                             "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2",
+                             "minimax-m3"],
+        # minimax-m3 vaza o chain-of-thought cru como `<think>...</think>` dentro de
+        # `content` (não usa `reasoning_content`), então entrar em reasoning_models
+        # não bastava — aquilo só ajusta o floor de max_tokens e injeta o extra_body
+        # quando o cliente pede thinking, e não filtra texto. Verificado ao vivo em
+        # 2026-08-26 direto na API do Go: sem o knob, 3/3 amostras vazam; com
+        # `thinking: {type: disabled}`, 3/3 limpas. Testados e rejeitados:
+        # `reasoning.enabled=false`, `chat_template_kwargs.thinking=false` e
+        # `enable_thinking=false` — todos continuam vazando. Tool calling não regride:
+        # 4/4 amostras com tools devolveram tool_calls válidos e content limpo.
+        # Incondicional (mesmo padrão do kimi-k3 no openrouter): Claude Code raramente
+        # pede thinking explícito, e o vazamento acontece em toda chamada.
+        "model_extra_body": {"minimax-m3": {"thinking": {"type": "disabled"}}},
         "default_model": "kimi-k2.7-code",
         "transient_error_patterns": ["Upstream request failed"],
         # Verified live (2026-07-05): the Go gateway accepts assistant.tool_calls +
@@ -153,8 +166,12 @@ BUILTIN: dict[str, dict] = {
         # atual é `deepseek-ai/deepseek-v4-flash-0731`, verificado ao vivo
         # (tool_use + tool_result convergindo). Não há mais nenhum modelo Qwen no
         # NIM, então as cadeias de fallback para qwen3-next também morreram.
+        #
+        # nemotron-3-super-120b-a12b entrou em 2026-08-26: sem estar aqui, vaza o
+        # raciocínio como texto no streaming ("Okay, the user is asking me to...").
         "reasoning_models": ["deepseek-ai/deepseek-v4-flash-0731",
-                             "stepfun-ai/step-3.7-flash"],
+                             "stepfun-ai/step-3.7-flash",
+                             "nvidia/nemotron-3-super-120b-a12b"],
         "default_model": "deepseek-ai/deepseek-v4-flash-0731",
         # Verified live (2026-07-05): NIM accepts native tool history (503s seen
         # during probing were the usual ResourceExhausted capacity flakiness).
