@@ -11,6 +11,7 @@ import copy
 import json
 import logging
 import time
+import uuid
 from typing import AsyncIterator
 
 import httpx
@@ -21,6 +22,12 @@ from .providers import CONFIG_DIR, RETRYABLE_STATUS, ProviderConfig
 CHAT_TIMEOUT = httpx.Timeout(300.0, connect=15.0)
 ERROR_DUMP_DIR = CONFIG_DIR / "error-dumps"
 log = logging.getLogger("claude_provider_proxy")
+
+# Fallback session id for providers with a session_header, used when the incoming
+# request carries no body.metadata.user_id (e.g. a client other than Claude Code).
+# One per daemon process — stable enough to satisfy "present and consistent",
+# though a real per-conversation id (see _headers) is preferred when available.
+_FALLBACK_SESSION_ID = uuid.uuid4().hex
 
 
 def _log_fatal(provider: ProviderConfig, model: str, status: int, body_text: str,
@@ -58,7 +65,7 @@ def strip_cache_control(obj):
     return obj
 
 
-def _headers(provider: ProviderConfig, anthropic: bool) -> dict:
+def _headers(provider: ProviderConfig, anthropic: bool, body: dict | None = None) -> dict:
     h = {"content-type": "application/json"}
     key = provider.api_key
     if provider.auth == "x-api-key":
@@ -71,6 +78,12 @@ def _headers(provider: ProviderConfig, anthropic: bool) -> dict:
         h["user-agent"] = provider.user_agent
     for k, v in provider.extra_headers.items():
         h[k] = v
+    if provider.session_header:
+        # Claude Code's own metadata.user_id already embeds a per-session UUID
+        # (e.g. "user_...._session_<uuid>") — reuse it so the same conversation maps
+        # to the same upstream session instead of minting an unrelated one.
+        user_id = ((body or {}).get("metadata") or {}).get("user_id")
+        h[provider.session_header] = user_id or _FALLBACK_SESSION_ID
     return h
 
 
@@ -95,7 +108,7 @@ async def handle_openai(provider: ProviderConfig, body: dict):
     requested = body.get("model") or provider.default_model
     stream = bool(body.get("stream"))
     url = f"{provider.base_url}/chat/completions"
-    headers = _headers(provider, anthropic=False)
+    headers = _headers(provider, anthropic=False, body=body)
     last_err = _err(502, "all models failed")
 
     for model in provider.chain_for(requested):
@@ -204,7 +217,7 @@ async def handle_anthropic(provider: ProviderConfig, body: dict):
         normalize_content(out)
         if provider.strip_cache_control_for(model):
             strip_cache_control(out)
-        headers = _headers(provider, anthropic=True)
+        headers = _headers(provider, anthropic=True, body=out)
         client = httpx.AsyncClient(timeout=CHAT_TIMEOUT)
         try:
             if stream:

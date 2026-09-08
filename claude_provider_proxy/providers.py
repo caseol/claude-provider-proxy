@@ -76,6 +76,13 @@ class ProviderConfig:
     fallbacks: dict[str, list[str]] = field(default_factory=dict)  # model -> chain
     default_fallback: list[str] = field(default_factory=list)
     default_model: str | None = None
+    # Name of a header this provider requires to route/cache by conversation (e.g.
+    # OpenCode Go's "x-opencode-session" — added 2026-09-07 after it started
+    # rejecting requests with MissingSessionID: "Request is missing x-opencode-session
+    # and cannot be routed efficiently"). When set, proxy_core fills it from the
+    # incoming Anthropic request's body.metadata.user_id (Claude Code already embeds
+    # a per-session UUID there) with a per-process fallback.
+    session_header: str = ""
 
     @property
     def api_key(self) -> str:
@@ -126,6 +133,8 @@ BUILTIN: dict[str, dict] = {
         # Verified live (2026-07-05): the Go gateway accepts assistant.tool_calls +
         # role:"tool" history replay (kimi answered from the tool result).
         "native_tool_history": True,
+        # Required as of 2026-09-07 — see session_header docstring on ProviderConfig.
+        "session_header": "x-opencode-session",
     },
     "opencode-zen": {
         # native_tool_history stays off: verified live (2026-07-05) that the Zen
@@ -373,6 +382,7 @@ def _make(name: str, d: dict) -> ProviderConfig:
         fallbacks={k: list(v) for k, v in d.get("fallbacks", {}).items()},
         default_fallback=list(d.get("default_fallback", [])),
         default_model=d.get("default_model"),
+        session_header=d.get("session_header", ""),
     )
 
 
