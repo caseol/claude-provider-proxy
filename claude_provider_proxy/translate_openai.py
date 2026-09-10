@@ -364,9 +364,16 @@ def openai_to_anthropic_response(data: dict, model: str) -> dict:
 
     for tc in (msg.get("tool_calls") or []):
         fn = tc.get("function", {}) or {}
+        raw_args = fn.get("arguments") or "{}"
         try:
-            args = json.loads(fn.get("arguments") or "{}")
-        except Exception:  # noqa: BLE001
+            args = json.loads(raw_args)
+        except Exception as e:  # noqa: BLE001
+            # A truncated/malformed arguments string (e.g. the model ran out of
+            # max_tokens mid-JSON) would otherwise silently become an empty tool_use
+            # input with no trace in the log — the client then rejects it with its
+            # own "invalid parameters" error and there's nothing here to explain why.
+            log.warning("model=%s tool_call %r has malformed JSON arguments (%s); "
+                        "using empty input: %.200r", model, fn.get("name"), e, raw_args)
             args = {}
         content.append({"type": "tool_use",
                         "id": tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}",

@@ -115,7 +115,20 @@ BUILTIN: dict[str, dict] = {
         "auth": "bearer",
         "reasoning_models": ["kimi-k2.7-code", "qwen3.7-max", "qwen3.7-plus",
                              "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2",
-                             "minimax-m3"],
+                             "minimax-m3", "kimi-k3"],
+        # kimi-k3 always reasons internally before answering (same model as OpenRouter's
+        # moonshotai/kimi-k3, see that entry's floor below) but was missing from this
+        # list, so it used the bare default floor of 1024. Reproduced live 2026-09-09
+        # against the real Go backend with Claude Code-sized budgets: max_tokens=120 ->
+        # reasoning burns the whole budget, content comes back null, no tool call at
+        # all; max_tokens=180 -> tool call emitted but truncated mid-JSON ("changes"
+        # cut off and collapsed into a malformed string) because reasoning left too
+        # little room to finish the arguments. That truncated JSON then failed to
+        # parse and was silently swallowed to {} (see translate_openai.py), producing
+        # a tool_use with missing required fields -> Claude Code rejects it with
+        # "Invalid tool parameters". max_tokens>=220 consistently produced clean,
+        # valid tool calls, so 1536 leaves comfortable headroom.
+        "min_tokens_reasoning": 1536,
         # minimax-m3 vaza o chain-of-thought cru como `<think>...</think>` dentro de
         # `content` (não usa `reasoning_content`), então entrar em reasoning_models
         # não bastava — aquilo só ajusta o floor de max_tokens e injeta o extra_body
