@@ -294,14 +294,14 @@ BUILTIN: dict[str, dict] = {
         "base_url": "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
         "auth": "bearer",
+        # Groq sits behind Cloudflare and 1010-blocks requests without a browser UA
+        # (verified live 2026-09-12: gpt-oss-120b/20b and qwen3.6-27b return 403
+        # error code 1010 with the default httpx UA; a Chrome UA returns 200).
+        "user_agent": _BROWSER_UA,
         # moonshotai/kimi-k2-instruct-0905 é documentado pela Groq mas retornou 404
         # "model_not_found" ao vivo (2026-07-15) — não disponível nesta conta apesar
         # de listado na doc pública. openai/gpt-oss-120b é o maior modelo confirmado
         # ao vivo (via /v1/models + chamada real) e vira o flagship.
-        # qwen/qwen3-32b e qwen/qwen3.6-27b também disponíveis, mas vazam tags
-        # <think>...</think> cruas dentro do content por padrão (reasoning_format
-        # "raw" é o default deles) — poluiria a resposta do Claude Code sem um
-        # reasoning_extra_body dedicado; ficam de fora do mapeamento por ora.
         # Só os modelos gpt-oss expõem reasoning limpo (campo message.reasoning
         # dedicado, nunca inline) na Groq; kimi-k2 e llama não têm o knob.
         "reasoning_models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
@@ -310,25 +310,22 @@ BUILTIN: dict[str, dict] = {
         # translate_openai.py já resgata (reasoning_content|reasoning).
         "reasoning_extra_body": {"reasoning_effort": "high", "include_reasoning": True},
         "default_model": "openai/gpt-oss-120b",
+        # Catalog rotated again (2026-09-16, via GET /v1/models): qwen/qwen3.6-27b —
+        # que vazava tags <think>...</think> cruas no content e por isso tinha um
+        # model_extra_body dedicado (removido abaixo) — não está mais no catálogo,
+        # só qwen/qwen3.8-27b sobrou da família qwen. Verificado ao vivo que
+        # qwen3.8-27b NÃO tem o vazamento (content limpo sem reasoning_effort
+        # nenhum), então nenhum extra_body substituto é necessário.
         "fallbacks": {
-            "openai/gpt-oss-120b": ["llama-3.3-70b-versatile", "openai/gpt-oss-20b",
-                                     "llama-3.1-8b-instant"],
-            "llama-3.3-70b-versatile": ["openai/gpt-oss-120b", "llama-3.1-8b-instant"],
-            "openai/gpt-oss-20b": ["llama-3.1-8b-instant"],
+            "openai/gpt-oss-120b": ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
+            "openai/gpt-oss-20b": ["qwen/qwen3.8-27b"],
+            "qwen/qwen3.8-27b": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
         },
         # Rede de segurança universal para qualquer slug fora do dict acima.
-        "default_fallback": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "default_fallback": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
         # Verificado ao vivo (2026-07-15): a Groq aceita assistant.tool_calls +
         # role:"tool" (tool_call_id) nativamente e responde de forma coerente.
         "native_tool_history": True,
-        # qwen/qwen3.6-27b (usado no slot Fable) vaza tags <think>...</think> cruas
-        # dentro do content por padrão (reasoning ligado sem pedido, formato "raw").
-        # reasoning_effort:"none" desliga o reasoning por completo — verificado ao
-        # vivo (2026-07-15): content limpo, tool calling normal, sem custo extra de
-        # tokens de raciocínio. Aplicado incondicionalmente (não gated por thinking,
-        # diferente de reasoning_extra_body) porque o vazamento acontece em toda
-        # chamada, não só quando o cliente pede extended thinking.
-        "model_extra_body": {"qwen/qwen3.6-27b": {"reasoning_effort": "none"}},
     },
     "gemini": {
         # Google Gemini via camada OpenAI-compatível do Google AI Studio / Vertex.
@@ -370,23 +367,26 @@ BUILTIN: dict[str, dict] = {
         # Verificado ao vivo (2026-08-07): kimi-k2.7-code-cloud round-trips
         # assistant.tool_calls + role:"tool" nativamente e responde de forma coerente.
         "native_tool_history": True,
-        # kimi-k2.7-code-cloud gera reasoning_content antes da resposta; o floor
-        # evita que o modelo gaste todo o max_tokens pensando e devolva content vazio.
-        "reasoning_models": ["kimi-k2.7-code-cloud"],
-        # Cadeia entre os 3 modelos "*-cloud" da virtual key (2026-08-07). Nota: o 429
-        # observado ao vivo nesse provider foi "extra usage auto reload monthly max
-        # reached" — um teto mensal *por chave*, não por modelo — então a troca de
-        # modelo não contorna esse caso específico. A cadeia continua útil para
-        # rate-limits por modelo (TPM/RPM individuais do LiteLLM) e para 5xx pontual
-        # de um dos backends.
+        # kimi-k2.6-cloud e deepseek-v4-flash:0731-cloud geram reasoning_content antes
+        # da resposta; o floor evita que o modelo gaste todo o max_tokens pensando e
+        # devolva content vazio.
+        "reasoning_models": ["kimi-k2.6-cloud", "deepseek-v4-flash:0731-cloud"],
+        # Cadeia entre os 4 modelos "*-cloud" da virtual key (catálogo real confirmado
+        # via /v1/models em 2026-09-15). Nota: o 429 observado ao vivo nesse provider
+        # foi "extra usage auto reload monthly max reached" — um teto mensal *por
+        # chave*, não por modelo — então a troca de modelo não contorna esse caso
+        # específico. A cadeia continua útil para rate-limits por modelo (TPM/RPM
+        # individuais do LiteLLM) e para 5xx pontual de um dos backends.
         "fallbacks": {
-            "kimi-k2.7-code-cloud": ["glm-5.2-cloud", "minimax-m3-cloud"],
-            "glm-5.2-cloud": ["minimax-m3-cloud", "kimi-k2.7-code-cloud"],
-            "minimax-m3-cloud": ["glm-5.2-cloud", "kimi-k2.7-code-cloud"],
+            "kimi-k2.6-cloud": ["deepseek-v4-flash:0731-cloud", "glm-5.3:cloud"],
+            "deepseek-v4-flash:0731-cloud": ["kimi-k2.6-cloud", "glm-5.3:cloud"],
+            "glm-5.3:cloud": ["glm-5.3-flash:cloud", "deepseek-v4-flash:0731-cloud"],
+            "glm-5.3-flash:cloud": ["glm-5.3:cloud", "deepseek-v4-flash:0731-cloud"],
         },
         # Rede de segurança para qualquer slug fora da lista acima (ex. um profile
         # customizado ou modelo novo adicionado à virtual key).
-        "default_fallback": ["glm-5.2-cloud", "minimax-m3-cloud", "kimi-k2.7-code-cloud"],
+        "default_fallback": ["deepseek-v4-flash:0731-cloud", "glm-5.3:cloud",
+                             "kimi-k2.6-cloud"],
     },
 }
 

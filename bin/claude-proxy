@@ -3,6 +3,7 @@
 #
 #   claude-proxy <provider> [--profile <name>] [-- <claude args>]
 #   claude-proxy profile <provider> {list|use <name>|show [name]|new <name>|edit [name]}
+#   claude-proxy sync-models [<provider>] [--fix]
 #   claude-proxy daemon {start|stop|status|logs}
 #
 # The daemon (single FastAPI process) is shared by all providers; the provider is
@@ -242,11 +243,17 @@ PYEOF
   fi
 }
 
+# ── sync models ───────────────────────────────────────────────────
+sync_models_cmd() {
+  ( cd "$HOME_DIR" && PYTHONPATH="$HOME_DIR" "$PY" -m claude_provider_proxy.sync_models "$@" )
+}
+
 # ── dispatch ──────────────────────────────────────────────────────
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,11p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  ""|-h|--help) sed -n '2,12p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
   daemon) shift; daemon "$@"; exit $? ;;
   profile) shift; profile_cmd "$@"; exit $? ;;
+  sync-models) shift; sync_models_cmd "$@"; exit $? ;;
 esac
 
 PROVIDER="$1"; shift

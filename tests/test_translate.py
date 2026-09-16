@@ -9,12 +9,14 @@ import httpx                                                       # noqa: E402
 
 from claude_provider_proxy import translate_openai as tx          # noqa: E402
 from claude_provider_proxy import proxy_core                      # noqa: E402
-from claude_provider_proxy.providers import load_providers, ProviderConfig  # noqa: E402
+from claude_provider_proxy.providers import load_providers, ProviderConfig, BUILTIN, _make  # noqa: E402
 
 ZEN = load_providers()["opencode-zen"]
-GROQ = load_providers()["groq"]
+# Use the built-in configs for tests so local providers.json overrides don't
+# break assertions about the shipped defaults.
+GROQ = _make("groq", BUILTIN["groq"])
 GEMINI = load_providers()["gemini"]
-LAND = load_providers()["land"]
+LAND = _make("land", BUILTIN["land"])
 NATIVE = ProviderConfig(name="nt", flavor="openai", base_url="http://u", api_key_env="K",
                         native_tool_history=True)
 
@@ -525,16 +527,16 @@ def test_zen_has_a_universal_fallback():
 
 
 def test_groq_fallback_chain_and_universal_default():
-    """Groq's flagship falls through llama-3.3-70b-versatile/gpt-oss-20b to the cheapest
-    llama-3.1-8b-instant; any slug not explicitly listed (e.g. a profile's OPUS/SONNET/
-    HAIKU slot) still gets a safety net via default_fallback instead of ending the turn
-    on the first 429/5xx."""
+    """Groq's flagship falls through gpt-oss-20b/qwen3.8-27b; any slug not explicitly
+    listed (e.g. a profile's OPUS/SONNET/HAIKU slot) still gets a safety net via
+    default_fallback instead of ending the turn on the first 429/5xx."""
     assert GROQ.chain_for("openai/gpt-oss-120b") == [
-        "openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b",
-        "llama-3.1-8b-instant"]
-    assert GROQ.chain_for("openai/gpt-oss-20b") == ["openai/gpt-oss-20b", "llama-3.1-8b-instant"]
+        "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+    assert GROQ.chain_for("openai/gpt-oss-20b") == [
+        "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
     assert GROQ.chain_for("some-unlisted-model") == [
-        "some-unlisted-model", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+        "some-unlisted-model", "openai/gpt-oss-120b", "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b"]
 
 
 def test_groq_default_model_used_when_model_omitted():
@@ -587,10 +589,10 @@ def test_land_provider_configuration():
 
 
 def test_land_native_tool_history_enabled():
-    """Verified live (2026-08-07): land's kimi-k2.7-code-cloud round-trips
+    """Verified live (2026-08-07): land's kimi-k2.6-cloud round-trips
     assistant.tool_calls + role:'tool' natively."""
     assert LAND.native_tool_history is True
-    body = {"model": "kimi-k2.7-code-cloud", "messages": [
+    body = {"model": "kimi-k2.6-cloud", "messages": [
         {"role": "assistant", "content": [
             {"type": "tool_use", "id": "t1", "name": "ls", "input": {}}]},
         {"role": "user", "content": [
@@ -603,25 +605,26 @@ def test_land_native_tool_history_enabled():
 
 
 def test_land_fallback_chains():
-    """Added after a live incident (2026-08-07): land had no fallbacks/default_fallback
-    configured, so every 429 exhausted the chain instantly. The chain cycles the 3
-    "*-cloud" models; it won't dodge a per-key monthly cap, but covers per-model
-    rate limits and transient 5xx."""
-    assert LAND.chain_for("kimi-k2.7-code-cloud") == [
-        "kimi-k2.7-code-cloud", "glm-5.2-cloud", "minimax-m3-cloud"]
-    assert LAND.chain_for("glm-5.2-cloud") == [
-        "glm-5.2-cloud", "minimax-m3-cloud", "kimi-k2.7-code-cloud"]
-    assert LAND.chain_for("minimax-m3-cloud") == [
-        "minimax-m3-cloud", "glm-5.2-cloud", "kimi-k2.7-code-cloud"]
+    """The chain cycles the 4 "*-cloud" models in the current key's catalog; it
+    won't dodge a per-key monthly cap, but covers per-model rate limits and
+    transient 5xx."""
+    assert LAND.chain_for("kimi-k2.6-cloud") == [
+        "kimi-k2.6-cloud", "deepseek-v4-flash:0731-cloud", "glm-5.3:cloud"]
+    assert LAND.chain_for("deepseek-v4-flash:0731-cloud") == [
+        "deepseek-v4-flash:0731-cloud", "kimi-k2.6-cloud", "glm-5.3:cloud"]
+    assert LAND.chain_for("glm-5.3:cloud") == [
+        "glm-5.3:cloud", "glm-5.3-flash:cloud", "deepseek-v4-flash:0731-cloud"]
+    assert LAND.chain_for("glm-5.3-flash:cloud") == [
+        "glm-5.3-flash:cloud", "glm-5.3:cloud", "deepseek-v4-flash:0731-cloud"]
     # unknown slugs fall through to the universal safety net
     assert LAND.chain_for("land") == [
-        "land", "glm-5.2-cloud", "minimax-m3-cloud", "kimi-k2.7-code-cloud"]
+        "land", "deepseek-v4-flash:0731-cloud", "glm-5.3:cloud", "kimi-k2.6-cloud"]
 
 
 def test_land_reasoning_token_floor_for_kimi():
-    """kimi-k2.7-code-cloud emits reasoning_content; its max_tokens is floored
+    """kimi-k2.6-cloud emits reasoning_content; its max_tokens is floored
     so reasoning doesn't starve the answer."""
-    body = {"model": "kimi-k2.7-code-cloud", "max_tokens": 10,
+    body = {"model": "kimi-k2.6-cloud", "max_tokens": 10,
             "messages": [{"role": "user", "content": "x"}]}
     o = tx.anthropic_to_openai(body, LAND)
     assert o["max_tokens"] == LAND.min_tokens_reasoning == 1024
@@ -655,17 +658,6 @@ def test_model_extra_body_applied_unconditionally():
 
     other_model = {**no_thinking, "model": "other"}
     assert "reasoning_effort" not in tx.anthropic_to_openai(other_model, provider)
-
-
-def test_groq_qwen36_gets_reasoning_disabled_unconditionally():
-    """qwen/qwen3.6-27b (Fable slot) leaks raw <think> tags into content by default —
-    reasoning_effort:"none" must be sent on every request for it, thinking or not,
-    while an unrelated model (e.g. the Opus slot's gpt-oss-120b) is unaffected."""
-    body = {"model": "qwen/qwen3.6-27b", "messages": [{"role": "user", "content": "x"}]}
-    assert tx.anthropic_to_openai(body, GROQ)["reasoning_effort"] == "none"
-
-    opus_body = {**body, "model": "openai/gpt-oss-120b"}
-    assert "reasoning_effort" not in tx.anthropic_to_openai(opus_body, GROQ)
 
 
 def test_load_providers_ignores_comment_key(tmp_path, monkeypatch):
