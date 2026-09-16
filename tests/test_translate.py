@@ -233,6 +233,34 @@ def test_native_tool_history_empty_result_placeholder():
     assert o["messages"][0]["content"] == "[empty result]"
 
 
+def test_tool_history_reasoning_key_injected_when_configured():
+    """DeepSeek requires the reasoning_content KEY present (any value, "" included)
+    on every assistant+tool_calls message that isn't the newest turn in history, or
+    it 400s with "The reasoning_content in the thinking mode must be passed back to
+    the API" — verified live 2026-09-16 on deepseek-flash and deepseek-v4-pro as soon
+    as a conversation has 2+ tool calls. tool_history_reasoning_key injects the key
+    with "" so the replay doesn't need to carry (or fabricate) real chain-of-thought."""
+    provider = ProviderConfig(name="ds", flavor="openai", base_url="http://u",
+                              api_key_env="K", native_tool_history=True,
+                              tool_history_reasoning_key="reasoning_content")
+    body = {"model": "m", "messages": [{"role": "assistant", "content": [
+        {"type": "tool_use", "id": "call_1", "name": "ls", "input": {}},
+    ]}]}
+    o = tx.anthropic_to_openai(body, provider)
+    assert o["messages"][0]["reasoning_content"] == ""
+
+
+def test_tool_history_reasoning_key_absent_by_default():
+    """Providers that don't set tool_history_reasoning_key (the default "") get no
+    extra field — DeepSeek is the only backend known to require this; sending it to
+    others is unnecessary at best."""
+    body = {"model": "m", "messages": [{"role": "assistant", "content": [
+        {"type": "tool_use", "id": "call_1", "name": "ls", "input": {}},
+    ]}]}
+    o = tx.anthropic_to_openai(body, NATIVE)
+    assert "reasoning_content" not in o["messages"][0]
+
+
 def test_native_tool_history_models_opts_in_per_model():
     """A provider with native_tool_history=False can still opt specific models into
     native tool_calls/role:"tool" via native_tool_history_models (OpenRouter's Kimi

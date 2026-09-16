@@ -131,7 +131,8 @@ def _merge_consecutive(msgs: list[dict]) -> list[dict]:
     return merged
 
 
-def convert_messages(messages: list[dict], native_tools: bool = False) -> list[dict]:
+def convert_messages(messages: list[dict], native_tools: bool = False,
+                      reasoning_key: str = "") -> list[dict]:
     out: list[dict] = []
     for m in messages:
         role = m.get("role", "user")
@@ -156,13 +157,20 @@ def convert_messages(messages: list[dict], native_tools: bool = False) -> list[d
                             "content": _non_empty(_flatten_blocks(rest), "[empty message]")})
         elif native_tools and role == "assistant" and tool_uses:
             text_blocks = [b for b in blocks if not (isinstance(b, dict) and b.get("type") == "tool_use")]
-            out.append({"role": "assistant",
-                        "content": _flatten_blocks(text_blocks).strip() or None,
-                        "tool_calls": [{"id": b.get("id") or f"call_{uuid.uuid4().hex[:24]}",
-                                        "type": "function",
-                                        "function": {"name": b.get("name"),
-                                                     "arguments": json.dumps(b.get("input", {}))}}
-                                       for b in tool_uses]})
+            msg_out = {"role": "assistant",
+                       "content": _flatten_blocks(text_blocks).strip() or None,
+                       "tool_calls": [{"id": b.get("id") or f"call_{uuid.uuid4().hex[:24]}",
+                                       "type": "function",
+                                       "function": {"name": b.get("name"),
+                                                    "arguments": json.dumps(b.get("input", {}))}}
+                                      for b in tool_uses]}
+            if reasoning_key:
+                # A Anthropic não expõe o CoT bruto do OpenAI de forma replayável (blocos
+                # "thinking" viram texto opaco em _flatten_blocks, não este campo); "" é
+                # aceito por backends que só exigem a CHAVE presente — ver docstring de
+                # ProviderConfig.tool_history_reasoning_key.
+                msg_out[reasoning_key] = ""
+            out.append(msg_out)
         else:
             out.append({"role": role,
                         "content": _non_empty(_flatten_blocks(content), "[empty message]")})
@@ -189,7 +197,8 @@ def anthropic_to_openai(body: dict, provider: ProviderConfig) -> dict:
     if system_str:
         openai_messages.append({"role": "system", "content": system_str})
     native_tools = provider.native_tool_history or model in provider.native_tool_history_models
-    openai_messages.extend(convert_messages(messages_data, native_tools=native_tools))
+    openai_messages.extend(convert_messages(messages_data, native_tools=native_tools,
+                                             reasoning_key=provider.tool_history_reasoning_key))
 
     out: dict = {
         "model": model,

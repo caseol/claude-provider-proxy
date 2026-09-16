@@ -83,6 +83,17 @@ class ProviderConfig:
     # incoming Anthropic request's body.metadata.user_id (Claude Code already embeds
     # a per-session UUID there) with a per-process fallback.
     session_header: str = ""
+    # Nome do campo OpenAI a injetar (com "") em toda mensagem assistant+tool_calls
+    # replayada no histórico nativo — vazio (default) não injeta nada. A API DeepSeek
+    # exige a CHAVE presente (não valida o conteúdo) em qualquer assistant+tool_calls
+    # que não seja o último turno do histórico, senão 400 "The reasoning_content in
+    # the thinking mode must be passed back to the API" — verificado ao vivo
+    # 2026-09-16 em deepseek-flash e deepseek-v4-pro, com 2+ tool calls na mesma
+    # conversa (uma só tool call não dispara, o que mascarou o problema numa sondagem
+    # inicial mais rasa). String vazia é aceita — não precisa cache nem CoT real.
+    # Provider-specific porque nenhum outro backend pede esse campo; mandar pra quem
+    # não pede é ruído na melhor hipótese.
+    tool_history_reasoning_key: str = ""
 
     @property
     def api_key(self) -> str:
@@ -173,6 +184,11 @@ BUILTIN: dict[str, dict] = {
         # any unlisted model to deepseek-v4-flash-free, the one Zen model with a
         # verified-stable, tuned reasoning floor.
         "default_fallback": ["deepseek-v4-flash-free"],
+        # Free-tier models reject requests without a session id: "MissingSessionID:
+        # OpenCode's free tier can only be used in OpenCode" — same error TYPE as
+        # opencode-go's 2026-09-07 incident, different message text. See
+        # session_header docstring on ProviderConfig.
+        "session_header": "x-opencode-session",
     },
     "nvidia": {
         "flavor": "openai",
@@ -396,6 +412,7 @@ def _make(name: str, d: dict) -> ProviderConfig:
         default_fallback=list(d.get("default_fallback", [])),
         default_model=d.get("default_model"),
         session_header=d.get("session_header", ""),
+        tool_history_reasoning_key=d.get("tool_history_reasoning_key", ""),
     )
 
 
